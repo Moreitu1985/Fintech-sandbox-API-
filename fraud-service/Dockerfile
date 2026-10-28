@@ -16,6 +16,13 @@ COPY --from=build /usr/local/lib/python3.13/site-packages /usr/local/lib/python3
 COPY --from=build /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY --from=build /app/fraud_service ./fraud_service
 COPY --from=build /app/model ./model
+# No package managers at runtime: removes pip/setuptools (and their vendored urllib3, msgpack...)
+# so nothing can be installed into the running container, and their CVEs don't ship.
+RUN rm -rf /usr/local/lib/python3.13/site-packages/pip /usr/local/lib/python3.13/site-packages/pip-* \
+           /usr/local/lib/python3.13/site-packages/setuptools /usr/local/lib/python3.13/site-packages/setuptools-* \
+           /usr/local/lib/python3.13/site-packages/pkg_resources /usr/local/lib/python3.13/site-packages/_distutils_hack \
+           /usr/local/lib/python3.13/site-packages/distutils-precedence.pth \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13
 USER app
 EXPOSE 8090
 ENV FRAUD_MODEL_DIR=/app/model
