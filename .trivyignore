@@ -1,0 +1,8 @@
+# Accepted container-scan findings. Every entry needs a reason, an owner action and an expiry.
+# When an entry expires, the scan fails again and the decision must be revisited.
+#
+# spring-webmvc 6.2.19: the fixes exist only in Spring Framework 7 (Spring Boot 4).
+# 6.2.19 is the latest open-source 6.2 release, so there is no patch to apply on Boot 3.5.
+# Action: migrate to Spring Boot 4 (planned in Phase 3). Review by the expiry date.
+CVE-2026-47884 exp:2027-01-31
+CVE-2026-47890 exp:2027-01-31
