@@ -4,10 +4,21 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # Major upgrades (e.g. Spring Boot 4, springdoc 3) change APIs and need a planned migration,
+      # not an automatic PR. Minor and patch updates (including security fixes) still arrive.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      spring-and-libraries:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: "/"
     schedule:
