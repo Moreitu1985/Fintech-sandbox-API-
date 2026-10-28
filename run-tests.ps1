@@ -1,8 +1,10 @@
-# LedgerForge: check prerequisites, then build and run every test.
+# LedgerForge: check Java, then build and run every test.
 # Run from this folder in PowerShell:  powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
+# No Maven install needed: the Maven Wrapper (mvnw.cmd) downloads the right version on first use.
 
 # Java and Maven write normal output to stderr; don't let Windows PowerShell treat that as fatal.
 $ErrorActionPreference = "Continue"
+Set-Location $PSScriptRoot
 Write-Host "== Checking prerequisites ==" -ForegroundColor Cyan
 
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
@@ -16,14 +18,9 @@ if ($verLine -notmatch '"(2[1-9]|[3-9]\d)') {
     exit 1
 }
 
-if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {
-    Write-Host "Maven not found. Install it: winget install Apache.Maven  (then open a NEW PowerShell window)" -ForegroundColor Red
-    exit 1
-}
-Write-Host ("Maven: " + (cmd /c "mvn -v 2>&1" | Select-Object -First 1))
-
-Write-Host "`n== Building and running tests (first run downloads libraries, ~2-5 min) ==" -ForegroundColor Cyan
-cmd /c "mvn -B verify 2>&1" | Tee-Object -FilePath build-output.txt
+Write-Host "`n== Building and running tests ==" -ForegroundColor Cyan
+Write-Host "First run downloads Maven and the libraries (a few minutes). Later runs are faster."
+cmd /c ".\mvnw.cmd -B verify 2>&1" | Tee-Object -FilePath build-output.txt
 $code = $LASTEXITCODE
 if ($code -eq 0) {
     Write-Host "`nALL TESTS PASSED" -ForegroundColor Green

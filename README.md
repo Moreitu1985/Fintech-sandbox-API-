@@ -39,11 +39,11 @@ flowchart TB
 
 ## Quickstart (5 minutes)
 
-**Run locally (in-memory H2 database):**
+**Run locally (in-memory H2 database).** Needs only Java 21: the Maven Wrapper downloads Maven on first use.
 
 ```bash
 export LEDGERFORGE_ADMIN_TOKEN=$(openssl rand -hex 32)
-mvn spring-boot:run
+./mvnw spring-boot:run      # Windows: .\mvnw.cmd spring-boot:run
 ```
 
 **Or with PostgreSQL via Docker:**
@@ -97,7 +97,7 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 ## Tests that prove the guarantees
 
 ```bash
-mvn verify
+./mvnw verify               # Windows: .\mvnw.cmd verify
 ```
 
 | Test | What it proves |
