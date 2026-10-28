@@ -1,5 +1,12 @@
 # LedgerForge
 
+[![CI](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml)
+![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Security: CodeQL + Trivy](https://img.shields.io/badge/security-CodeQL%20%2B%20Trivy-blue)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **A secure, multi-tenant double-entry ledger API for fintechs: money that can't be lost, duplicated or quietly rewritten.**
 
 Built with Java 21 and Spring Boot 3, backed by PostgreSQL, and tested for the failures that cost real money: double charges on retry, race conditions between concurrent payments, cross-tenant data leaks and tampered records.
@@ -36,6 +43,20 @@ flowchart TB
     L --> DB[(PostgreSQL<br/>append-only history)]
     A --> DB
 ```
+
+## Public demo
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Moreitu1985/Fintech-sandbox-API-)
+
+The `demo` profile runs the full API with an in-memory database (it resets on restart), Swagger UI, and self-serve sign-up, so anyone can try it without an admin token:
+
+```bash
+# Get your own isolated sandbox tenant and API key
+curl -s -X POST https://<demo-host>/sandbox/signup \
+  -H "Content-Type: application/json" -d '{"name":"My Test Fintech"}'
+```
+
+Then open `https://<demo-host>/swagger-ui.html`, click **Authorize**, paste the key, and try the endpoints. On the free plan the demo sleeps when idle, so the first request can take about a minute.
 
 ## Quickstart (5 minutes)
 

@@ -1,0 +1,21 @@
+# Render Blueprint for the public LedgerForge demo.
+# Deploy: Render dashboard -> New -> Blueprint -> select this repository.
+# Free plan: sleeps after 15 minutes idle (about a minute to wake); the demo database is in memory
+# and resets on every restart, which suits a sandbox.
+services:
+  - type: web
+    name: ledgerforge-demo
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: demo
+      - key: LEDGERFORGE_ADMIN_TOKEN
+        generateValue: true   # random secret created by Render; view it in the dashboard if needed
+      - key: JAVA_TOOL_OPTIONS
+        value: "-XX:+UseSerialGC -Xss512k -XX:TieredStopAtLevel=1"

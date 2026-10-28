@@ -7,6 +7,7 @@ import io.ledgerforge.security.RateLimitFilter;
 import io.ledgerforge.tenant.TenantService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -42,6 +43,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Only has a handler when the demo profile enables self-signup; otherwise 404.
+                        .requestMatchers(HttpMethod.POST, "/sandbox/signup").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/v1/**").hasRole("TENANT")
                         .anyRequest().denyAll())

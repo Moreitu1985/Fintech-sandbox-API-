@@ -89,6 +89,12 @@ class SecurityTest extends IntegrationTestBase {
     }
 
     @Test
+    void sandboxSignupDoesNotExistOutsideDemo() throws Exception {
+        mvc.perform(post("/sandbox/signup").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void healthIsPublic() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
