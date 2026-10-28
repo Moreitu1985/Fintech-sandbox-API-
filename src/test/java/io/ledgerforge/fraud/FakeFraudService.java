@@ -22,6 +22,8 @@ final class FakeFraudService implements AutoCloseable {
     private final ObjectMapper json = new ObjectMapper();
     final List<JsonNode> requests = new CopyOnWriteArrayList<>();
     volatile boolean down;
+    /** When non-zero, answer every request with this HTTP status (e.g. 401 to simulate a token mismatch). */
+    volatile int forcedStatus;
 
     FakeFraudService() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -29,7 +31,10 @@ final class FakeFraudService implements AutoCloseable {
             byte[] body = exchange.getRequestBody().readAllBytes();
             String reply;
             int status;
-            if (down) {
+            if (forcedStatus != 0) {
+                status = forcedStatus;
+                reply = "{\"detail\":\"forced\"}";
+            } else if (down) {
                 status = 503;
                 reply = "{\"detail\":\"down\"}";
             } else if (!TOKEN.equals(exchange.getRequestHeaders().getFirst("X-Service-Token"))) {

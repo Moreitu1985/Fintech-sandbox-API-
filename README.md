@@ -48,19 +48,19 @@ flowchart TB
 
 ## AI fraud detection (Phase 2)
 
-Before a customer transfer moves money, the `fraud-check` plugin computes behaviour features from the ledger itself (amount vs. the account's usual, transfers in the last hour, first payment to this recipient, share of balance used, account age, time of day) and asks the [fraud service](fraud-service/) for a decision.
+Before a customer transfer moves money, and before any lock is taken, the `fraud-check` plugin computes behaviour features from the ledger itself (amount vs. the account's usual, transfers in the last hour, first payment to this recipient, share of balance used, account age, time of day) and asks the [fraud service](fraud-service/) for a decision.
 
 | Decision | What happens |
 |---|---|
-| **BLOCK** | Transfer refused with `422 PLUGIN_REJECTED` and the model's reasons; no money moves |
+| **BLOCK** | Transfer refused with `422 PLUGIN_REJECTED` (generic message); no money moves; a `FRAUD_BLOCK` event with score and reasons is committed to the audit chain |
 | **REVIEW** | Transfer goes ahead; a `FRAUD_REVIEW` event with score and reasons is added to the tamper-evident audit chain |
 | **ALLOW** | Nothing extra |
 
-Example reasons for a blocked transfer: *"Transfer uses 97% of the available balance · First transfer to this recipient · Time of day (02:00) raised the risk"*.
+Example reasons recorded for a blocked transfer: *"Transfer uses 97% of the available balance · First transfer to this recipient · Late-night transfer (02:00)"*. They go to the audit log; the API caller only sees "declined by risk checks", so the reasons cannot be used to tune an attack.
 
 Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
 
-Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs all three services together. If the fraud service is down, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`.
+Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs all three services together. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
 
 ## Public demo
 

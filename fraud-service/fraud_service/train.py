@@ -26,7 +26,7 @@ SEED = 7
 
 
 def _threshold_at_fpr(scores_legit: np.ndarray, target_fpr: float) -> float:
-    """Smallest score threshold whose false positive rate on legit transfers is <= target."""
+    """Score quantile at which about `target_fpr` of legitimate validation transfers are flagged (score >= threshold)."""
     return float(np.quantile(scores_legit, 1.0 - target_fpr))
 
 

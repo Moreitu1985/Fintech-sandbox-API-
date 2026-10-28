@@ -40,6 +40,10 @@ app = FastAPI(
     version="1.0.0",
     description="Scores ledger transfers for fraud risk and explains each decision.",
     lifespan=lifespan,
+    # Interactive docs are off unless explicitly enabled (internal service; nothing to browse in production).
+    docs_url="/docs" if os.environ.get("FRAUD_SERVICE_DOCS") == "true" else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if os.environ.get("FRAUD_SERVICE_DOCS") == "true" else None,
 )
 
 

@@ -14,7 +14,7 @@ FEATURES: list[str] = [
     "amount_to_avg_ratio",    # amount / source account's average outgoing amount (30d); 1.0 if no history
     "account_age_hours",      # age of the source account
     "tx_count_1h",            # outgoing transfers from the source in the last hour (before this one)
-    "amount_sum_24h",         # outgoing amount from the source in the last 24h, major units
+    "amount_sum_24h",         # outgoing amount from the source in the last 24h INCLUDING this transfer, major units
     "new_counterparty",       # 1 if the source has never sent to this destination before
     "balance_drain_ratio",    # amount / source balance before the transfer (0..1; 0 for funding accounts)
     "hour_of_day",            # 0..23, Africa/Johannesburg time
@@ -33,7 +33,7 @@ class TransferFeatures(BaseModel):
     new_counterparty: bool
     balance_drain_ratio: float = Field(ge=0, le=1)
     hour_of_day: int = Field(ge=0, le=23)
-    prior_tx_count: int = Field(ge=0, le=10_000_000)
+    prior_tx_count: int = Field(ge=0, le=1_000_000_000_000)
 
     def as_row(self) -> list[float]:
         return [float(getattr(self, name)) for name in FEATURES]

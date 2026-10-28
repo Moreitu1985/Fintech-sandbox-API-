@@ -5,7 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY fraud_service ./fraud_service
-RUN python -m fraud_service.train /app/model
+# The image fails to build if the model it would ship does not pass the quality gates.
+RUN python -m fraud_service.train /app/model && python -m fraud_service.gates /app/model
 
 # Runtime stage: no compilers, non-root user, model baked in.
 FROM python:3.13-slim

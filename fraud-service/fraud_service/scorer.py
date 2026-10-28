@@ -39,27 +39,45 @@ class Score:
     model_version: str
 
 
-def _describe(feature: str, f: TransferFeatures) -> str:
+def _describe(feature: str, f: TransferFeatures) -> str | None:
+    """Plain-language reason for a feature that pushed the score up.
+
+    A risk-specific sentence is used only when the value really is in the risky range; otherwise the
+    wording stays neutral ("... raised the risk"), so a reason can never state something untrue
+    (e.g. calling an old account "new"). Returns None when the value is not a meaningful risk signal.
+    """
     match feature:
         case "amount":
-            return f"Large amount ({f.amount:,.2f})"
+            return f"Amount of {f.amount:,.2f}"
         case "amount_to_avg_ratio":
-            return f"Amount is {f.amount_to_avg_ratio:.1f}x this account's usual transfer"
+            if f.amount_to_avg_ratio >= 2:
+                return f"Amount is {f.amount_to_avg_ratio:.1f}x this account's usual transfer"
+            return f"Amount relative to this account's usual transfer ({f.amount_to_avg_ratio:.1f}x) raised the risk"
         case "account_age_hours":
-            return f"Account is new ({f.account_age_hours:.0f} hours old)"
+            if f.account_age_hours < 168:
+                return f"Account is new ({f.account_age_hours:.0f} hours old)"
+            return f"Account age ({f.account_age_hours / 24:.0f} days) raised the risk"
         case "tx_count_1h":
-            return f"{f.tx_count_1h} transfers from this account in the last hour"
+            if f.tx_count_1h >= 3:
+                return f"{f.tx_count_1h} transfers from this account in the last hour"
+            return f"Recent activity ({f.tx_count_1h} transfers in the last hour) raised the risk"
         case "amount_sum_24h":
             return f"{f.amount_sum_24h:,.2f} sent from this account in the last 24 hours"
         case "new_counterparty":
-            return "First transfer to this recipient" if f.new_counterparty else "Known recipient"
+            return "First transfer to this recipient" if f.new_counterparty else None
         case "balance_drain_ratio":
-            return f"Transfer uses {f.balance_drain_ratio:.0%} of the available balance"
+            if f.balance_drain_ratio >= 0.5:
+                return f"Transfer uses {f.balance_drain_ratio:.0%} of the available balance"
+            return f"Share of balance used ({f.balance_drain_ratio:.0%}) raised the risk"
         case "hour_of_day":
+            if f.hour_of_day >= 22 or f.hour_of_day <= 5:
+                return f"Late-night transfer ({f.hour_of_day:02d}:00)"
             return f"Time of day ({f.hour_of_day:02d}:00) raised the risk"
         case "prior_tx_count":
-            return f"Little account history ({f.prior_tx_count} previous transfers)"
-    return feature
+            if f.prior_tx_count < 5:
+                return f"Little account history ({f.prior_tx_count} previous transfers)"
+            return f"Account history ({f.prior_tx_count} previous transfers) raised the risk"
+    return None
 
 
 class FraudScorer:
@@ -87,6 +105,10 @@ class FraudScorer:
         reasons: list[Reason] = []
         if decision is not Decision.ALLOW:
             ranked = sorted(zip(FEATURES, contributions), key=lambda kv: kv[1], reverse=True)
-            reasons = [Reason(name, round(float(c), 4), _describe(name, features))
-                       for name, c in ranked if c > 0][:max_reasons]
+            for name, c in ranked:
+                if c <= 0 or len(reasons) == max_reasons:
+                    break
+                message = _describe(name, features)
+                if message is not None:
+                    reasons.append(Reason(name, round(float(c), 4), message))
         return Score(round(probability, 6), decision, reasons, self.model_version)

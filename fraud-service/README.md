@@ -15,7 +15,7 @@ export FRAUD_SERVICE_TOKEN=$(openssl rand -hex 32)  # Windows: $env:FRAUD_SERVIC
 uvicorn fraud_service.api:app --port 8090
 ```
 
-Interactive docs: <http://localhost:8090/docs>
+Interactive docs: set `FRAUD_SERVICE_DOCS=true`, then open <http://localhost:8090/docs> (off by default).
 
 ## API
 
@@ -52,7 +52,7 @@ Response:
     {
       "feature": "hour_of_day",
       "contribution": 3.2111,
-      "message": "Time of day (02:00) raised the risk"
+      "message": "Late-night transfer (02:00)"
     }
   ],
   "model_version": "fraud-lgbm-1.0.0"
@@ -67,4 +67,4 @@ Other endpoints: `GET /health` (public) and `GET /v1/model` (thresholds and held
 pytest
 ```
 
-The tests include API behaviour, authentication, input validation, and **model quality gates** that fail if a retrained model gets worse.
+The tests include API behaviour, authentication, input validation, a check that reason messages never state something untrue, and **model quality gates** (`fraud_service/gates.py`). The Docker build runs the same gates on the model it ships.

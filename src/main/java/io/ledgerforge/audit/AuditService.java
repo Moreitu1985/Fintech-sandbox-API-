@@ -40,6 +40,16 @@ public class AuditService {
         return saved;
     }
 
+    /**
+     * Appends an event in its own transaction, so it is kept even when the caller's transaction rolls
+     * back (e.g. a blocked transfer). Only call this before the caller holds the tenant lock, or it
+     * would wait on itself.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public AuditEvent appendIndependently(UUID tenantId, String eventType, String payload) {
+        return append(tenantId, eventType, payload);
+    }
+
     @Transactional(readOnly = true)
     public AuditChain.Verification verify(UUID tenantId) {
         Tenant tenant = tenants.findById(tenantId).orElseThrow(() -> ApiException.notFound("Tenant"));

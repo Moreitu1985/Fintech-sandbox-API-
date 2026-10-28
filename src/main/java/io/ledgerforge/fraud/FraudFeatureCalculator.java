@@ -54,16 +54,20 @@ public class FraudFeatureCalculator {
             drain = Math.min(1.0, (double) amount / source.getBalance());
         }
 
+        // Ranges are clamped to what fraud-service accepts, so an extreme but genuine account can never
+        // make its requests invalid (which would refuse its transfers as a misconfiguration).
+        long sent24h = postings.sumOutgoingSince(source.getId(), now.minus(Duration.ofHours(24)));
         return new FraudModels.Features(
-                amount / MINOR_UNITS,
+                Math.min(amount / MINOR_UNITS, 1e10),
                 Math.min(ratio, 1e6),
-                Math.max(0, Duration.between(source.getCreatedAt(), now).toMinutes() / 60.0),
-                postings.countOutgoingSince(source.getId(), now.minus(Duration.ofHours(1))),
-                postings.sumOutgoingSince(source.getId(), now.minus(Duration.ofHours(24))) / MINOR_UNITS,
+                Math.min(Math.max(0, Duration.between(source.getCreatedAt(), now).toMinutes() / 60.0), 1e6),
+                Math.min(postings.countOutgoingSince(source.getId(), now.minus(Duration.ofHours(1))), 100_000),
+                // Includes this transfer, as in training (synth: amount_sum_24h >= amount).
+                Math.min((sent24h + amount) / MINOR_UNITS, 1e12),
                 !transactions.existsByTenantIdAndFromAccountIdAndToAccountId(
                         transfer.tenantId(), transfer.fromAccountId(), transfer.toAccountId()),
                 drain,
                 now.atZone(LOCAL_ZONE).getHour(),
-                postings.countOutgoing(source.getId()));
+                Math.min(postings.countOutgoing(source.getId()), 1_000_000_000_000L));
     }
 }
