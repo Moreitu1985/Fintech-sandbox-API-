@@ -23,3 +23,17 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+  - package-ecosystem: pip
+    directory: "/fraud-service"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/fraud-service"
+    schedule:
+      interval: weekly

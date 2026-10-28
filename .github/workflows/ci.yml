@@ -44,6 +44,37 @@ jobs:
             echo "| $name | $(attr tests) | $(attr failures) | $(attr errors) | $(attr skipped) |" >> "$GITHUB_STEP_SUMMARY"
           done
 
+  fraud-service:
+    name: Fraud service tests (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fraud-service
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: fraud-service/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Train, then run API tests and model quality gates
+        run: python -m pytest -v
+      - name: Publish model metrics
+        run: |
+          python -m fraud_service.train model > /dev/null
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          m = json.load(open("model/metadata.json"))["metrics"]
+          print("## Fraud model (held-out test set, synthetic data)")
+          print(f"ROC AUC **{m['roc_auc']}** · PR AUC **{m['pr_auc']}**\n")
+          print("| Threshold | Precision | Recall | False positive rate |")
+          print("|---|---|---|---|")
+          for name, key in [("REVIEW", "at_review_threshold"), ("BLOCK", "at_block_threshold"), ("Hand-written rule", "baseline_rule")]:
+              r = m[key]
+              print(f"| {name} | {r['precision']:.1%} | {r['recall']:.1%} | {r['false_positive_rate']:.2%} |")
+          PY
+
   codeql:
     name: CodeQL security scan
     runs-on: ubuntu-latest
@@ -54,25 +85,33 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
-          languages: java-kotlin
+          languages: java-kotlin, python
           build-mode: none
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
 
   container-scan:
-    name: Container vulnerability scan
+    name: Container vulnerability scan (${{ matrix.image }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ledger-api
+            context: .
+          - image: fraud-service
+            context: fraud-service
     permissions:
       contents: read
       security-events: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Build image
-        run: docker build -t ledgerforge:ci .
+        run: docker build -t ${{ matrix.image }}:ci ${{ matrix.context }}
       # 1) Report: every fixable CRITICAL/HIGH finding goes to the Security tab (SARIF).
       - name: Scan with Trivy (report)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ledgerforge:ci
+          image-ref: ${{ matrix.image }}:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           trivyignores: .trivyignore
@@ -84,11 +123,11 @@ jobs:
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           sarif_file: trivy-results.sarif
-          category: trivy-container
+          category: trivy-${{ matrix.image }}
       - name: Summarise findings
         if: always()
         run: |
-          echo "## Container scan (fixable CRITICAL/HIGH)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Container scan: ${{ matrix.image }} (fixable CRITICAL/HIGH)" >> "$GITHUB_STEP_SUMMARY"
           if [ ! -s trivy-results.sarif ]; then echo "No report produced." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
           count=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
           echo "Findings: **$count**" >> "$GITHUB_STEP_SUMMARY"

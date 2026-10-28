@@ -29,7 +29,8 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | Multi-tenancy | Each fintech sees only its own data; cross-tenant ids return 404 |
 | Tamper-evident audit | Per-tenant SHA-256 hash chain; append-only tables enforced by PostgreSQL triggers |
 | Proof on demand | `GET /v1/ledger/integrity` checks that books balance, balances match postings and the audit chain is intact |
-| Plugins | `TransferPlugin` beans hook into every transfer without touching the core (example: per-transfer limit) |
+| Plugins | `TransferPlugin` beans hook into every transfer without touching the core (examples: per-transfer limit, fraud check) |
+| AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
 | API security | Hashed API keys, constant-time checks, rate limiting, strict headers, RFC 9457 errors with request ids |
 
 ## Architecture
@@ -39,10 +40,27 @@ flowchart TB
     C[Fintech clients] --> G[Security gateway<br/>API keys · rate limits · validation · request IDs]
     G --> L[Ledger core<br/>accounts · transfers · idempotency]
     L --> P[Plugin host<br/>hooks around every transfer]
+    P -->|behaviour features| F[Fraud service · Python<br/>LightGBM · explainable reasons]
     L --> A[Audit chain<br/>SHA-256 linked events]
     L --> DB[(PostgreSQL<br/>append-only history)]
     A --> DB
 ```
+
+## AI fraud detection (Phase 2)
+
+Before a customer transfer moves money, the `fraud-check` plugin computes behaviour features from the ledger itself (amount vs. the account's usual, transfers in the last hour, first payment to this recipient, share of balance used, account age, time of day) and asks the [fraud service](fraud-service/) for a decision.
+
+| Decision | What happens |
+|---|---|
+| **BLOCK** | Transfer refused with `422 PLUGIN_REJECTED` and the model's reasons; no money moves |
+| **REVIEW** | Transfer goes ahead; a `FRAUD_REVIEW` event with score and reasons is added to the tamper-evident audit chain |
+| **ALLOW** | Nothing extra |
+
+Example reasons for a blocked transfer: *"Transfer uses 97% of the available balance · First transfer to this recipient · Time of day (02:00) raised the risk"*.
+
+Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
+
+Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs all three services together. If the fraud service is down, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`.
 
 ## Public demo
 
@@ -128,6 +146,8 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |
+| `FraudCheckPluginTest`, `FraudCheckFailClosedTest` | Features sent to the model are computed correctly; BLOCK moves no money; REVIEW is audited; outages fail open or closed as configured |
+| `fraud-service/tests` (pytest) | Scoring API, auth, validation, and model quality gates that fail CI if a retrained model gets worse |
 | `TransferFlowTest` | Insufficient funds, currency mismatch, plugin limits and validation errors behave correctly |
 
 ## Design decisions
@@ -138,6 +158,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 2. [Pessimistic locking in a fixed order](docs/adr/0002-pessimistic-locking.md)
 3. [Hashed, prefixed API keys](docs/adr/0003-api-key-hashing.md)
 4. [Hash-chained audit log](docs/adr/0004-hash-chained-audit.md)
+5. [Fraud scoring as a synchronous plugin](docs/adr/0005-fraud-scoring-plugin.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -145,15 +166,19 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 | Phase | Focus | Status |
 |---|---|---|
-| 1 | Ledger core, security, tests, Docker, CI | In progress |
-| 2 | Python fraud-scoring service as a transfer plugin; LLM assistant endpoint | Planned |
+| 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
+| 2 | Python fraud-scoring service as a transfer plugin (done); LLM assistant endpoint | In progress |
 | 3 | OAuth2 + mTLS, Redis rate limits, OpenTelemetry, Testcontainers, Kubernetes, load tests | Planned |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
 ## Tech stack
 
-Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 (tests) · springdoc OpenAPI · JUnit 5 · Docker · GitHub Actions · CodeQL · Dependabot
+**Ledger:** Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 (tests) · springdoc OpenAPI · JUnit 5
+
+**Fraud service:** Python 3.13 · FastAPI · LightGBM (TreeSHAP explanations) · scikit-learn · pandas · pytest
+
+**Delivery and security:** Docker · Docker Compose · GitHub Actions · CodeQL (Java + Python) · Trivy · Dependabot · Render
 
 ## License
 

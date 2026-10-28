@@ -34,6 +34,9 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Information disclosure | Traffic interception | HTTPS with HSTS at the edge | Partial (TLS termination in deployment) |
 | **D**enial of service | Request flood | Token-bucket limits per key and per IP | Implemented (per instance; Redis in Phase 3) |
 | Denial of service | Oversized or malicious input | Bean Validation limits on every field; amount ceiling; paging capped at 100 | Implemented |
+| Tampering | Fraudulent transfer from a taken-over account | ML fraud check before money moves: BLOCK refuses, REVIEW is audited with reasons | Implemented (Phase 2) |
+| Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Shared 32+ char service token, constant-time check; service only on the internal Docker network | Implemented (mTLS in Phase 3) |
+| Denial of service | Fraud service slow or down stalls payments | 500 ms / 1.5 s timeouts; explicit fail-open or fail-closed policy | Implemented |
 | **E**levation of privilege | Tenant key used on admin endpoints | Separate roles; admin requires the admin token | Implemented |
 | Elevation of privilege | Unknown or forgotten endpoints exposed | Default-deny authorization rule; only health is public | Implemented |
 
@@ -46,11 +49,11 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | API3 Broken object property level authorization | DTOs only; entities never serialized; `allowNegative` fixed at creation |
 | API4 Unrestricted resource consumption | Rate limits, page caps, validation |
 | API5 Broken function level authorization | `/admin` vs `/v1` roles; default deny |
-| API6 Unrestricted access to sensitive business flows | Per-transfer limit plugin; fraud plugin in Phase 2 |
+| API6 Unrestricted access to sensitive business flows | Per-transfer limit plugin; ML fraud-check plugin (BLOCK / REVIEW) |
 | API7 Server-side request forgery | No user-supplied URLs are fetched (webhooks in Phase 4 will use an allow-list) |
 | API8 Security misconfiguration | Secure headers, no default users, Swagger off in prod, CodeQL in CI |
 | API9 Improper inventory management | Versioned `/v1` paths, OpenAPI spec |
-| API10 Unsafe consumption of APIs | Partner responses validated in connector plugins (Phase 5) |
+| API10 Unsafe consumption of APIs | Fraud-service responses are typed and validated, with timeouts and a defined failure policy; partner connectors follow the same rule (Phase 5) |
 
 ## Known gaps (honest list)
 
@@ -58,3 +61,4 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - The audit chain proves tampering but cannot stop a full database administrator from rewriting it; external anchoring is planned.
 - No end-user (customer) authentication: tenants authenticate, and they are responsible for their own users.
 - Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned for Phase 3. Every other fixable CRITICAL/HIGH finding fails the build.
+- The fraud model is trained on synthetic data and defaults to fail-open in the sandbox. Real deployments need retraining on real labelled data and a fail-closed or fallback policy.

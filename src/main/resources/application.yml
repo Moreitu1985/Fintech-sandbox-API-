@@ -40,6 +40,13 @@ ledgerforge:
     max-transfer:
       enabled: true
       amount: 5000000        # minor units: 50,000.00
+    fraud:
+      enabled: ${FRAUD_ENABLED:false}
+      url: ${FRAUD_SERVICE_URL:http://localhost:8090}
+      token: ${FRAUD_SERVICE_TOKEN:}
+      fail-open: ${FRAUD_FAIL_OPEN:true}   # sandbox default; set false to refuse transfers when scoring is down
+      connect-timeout: 500ms
+      read-timeout: 1500ms
 
 logging:
   pattern:
