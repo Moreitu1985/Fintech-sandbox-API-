@@ -68,6 +68,7 @@ jobs:
           image-ref: ledgerforge:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore
           format: sarif
           output: trivy-results.sarif
           exit-code: "0"

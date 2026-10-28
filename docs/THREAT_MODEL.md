@@ -57,3 +57,4 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - Rate limits are per instance until Redis is added.
 - The audit chain proves tampering but cannot stop a full database administrator from rewriting it; external anchoring is planned.
 - No end-user (customer) authentication: tenants authenticate, and they are responsible for their own users.
+- Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned for Phase 3. Every other fixable CRITICAL/HIGH finding fails the build.
