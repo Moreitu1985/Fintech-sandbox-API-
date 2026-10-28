@@ -7,7 +7,7 @@ COPY src ./src
 RUN mvn -q -B package -DskipTests
 
 # Runtime stage: JRE only, non-root user
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=build /src/target/ledgerforge-*.jar app.jar
