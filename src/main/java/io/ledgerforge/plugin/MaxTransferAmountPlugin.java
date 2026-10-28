@@ -2,10 +2,12 @@ package io.ledgerforge.plugin;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /** Example plugin: blocks any single transfer above a configured limit. Toggle it off in config. */
 @Component
+@Order(10) // cheap local checks run before remote ones
 @ConditionalOnProperty(prefix = "ledgerforge.plugins.max-transfer", name = "enabled", havingValue = "true")
 public class MaxTransferAmountPlugin implements TransferPlugin {
 

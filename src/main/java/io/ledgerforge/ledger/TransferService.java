@@ -66,11 +66,26 @@ public class TransferService {
         }
         String requestHash = Hashing.sha256Hex(canonical(request));
 
+        // A retry of a completed transfer is answered from the immutable idempotency record,
+        // without taking locks and without re-running checks.
+        Optional<Result> replay = replayIfSeen(tenantId, idempotencyKey, requestHash);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+
+        // Slow checks (e.g. the remote fraud model) run before any lock, so they never stall the
+        // tenant's other payments. They see committed, unlocked data.
+        TransferContext preLock = new TransferContext(tenantId, request.fromAccountId(), request.toAccountId(),
+                request.amount(), request.currency(), request.reference(), null);
+        for (TransferPlugin plugin : plugins) {
+            plugin.beforeLocking(preLock);
+        }
+
         // Lock order for every write path: tenant first, then accounts in ascending id order.
-        // The tenant lock also serialises same-key requests, so the idempotency check below cannot race.
+        // The tenant lock also serialises same-key requests, so the re-check below cannot race.
         tenants.lockById(tenantId).orElseThrow(() -> ApiException.notFound("Tenant"));
 
-        Optional<Result> replay = replayIfSeen(tenantId, idempotencyKey, requestHash);
+        replay = replayIfSeen(tenantId, idempotencyKey, requestHash);
         if (replay.isPresent()) {
             return replay.get();
         }

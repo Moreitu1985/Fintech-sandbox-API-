@@ -18,14 +18,30 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      fraud:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      FRAUD_ENABLED: "true"
+      FRAUD_SERVICE_URL: http://fraud:8090
+      FRAUD_SERVICE_TOKEN: ${FRAUD_SERVICE_TOKEN:?Set FRAUD_SERVICE_TOKEN in .env}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/ledgerforge
       SPRING_DATASOURCE_USERNAME: ledgerforge
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       LEDGERFORGE_ADMIN_TOKEN: ${LEDGERFORGE_ADMIN_TOKEN:?Set LEDGERFORGE_ADMIN_TOKEN in .env}
     ports:
       - "8080:8080"
+
+  fraud:
+    build: ./fraud-service
+    environment:
+      FRAUD_SERVICE_TOKEN: ${FRAUD_SERVICE_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published to the host: only the ledger API talks to it.
 
 volumes:
   pgdata:
