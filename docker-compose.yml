@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ledgerforge
+      POSTGRES_USER: ledgerforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerforge -d ledgerforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/ledgerforge
+      SPRING_DATASOURCE_USERNAME: ledgerforge
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      LEDGERFORGE_ADMIN_TOKEN: ${LEDGERFORGE_ADMIN_TOKEN:?Set LEDGERFORGE_ADMIN_TOKEN in .env}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
