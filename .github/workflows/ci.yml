@@ -54,14 +54,56 @@ jobs:
   container-scan:
     name: Container vulnerability scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Build image
         run: docker build -t ledgerforge:ci .
-      - name: Scan with Trivy
+      # 1) Report: every fixable CRITICAL/HIGH finding goes to the Security tab (SARIF).
+      - name: Scan with Trivy (report)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ledgerforge:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+      - name: Upload results to the GitHub Security tab
+        if: always() && github.event_name == 'push'
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container
+      - name: Summarise findings
+        if: always()
+        run: |
+          echo "## Container scan (fixable CRITICAL/HIGH)" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -s trivy-results.sarif ]; then echo "No report produced." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          count=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+          echo "Findings: **$count**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -gt 0 ]; then
+            echo '| Rule | Severity | Location |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            jq -r '.runs[] as $r | $r.results[] | . as $res
+              | ($r.tool.driver.rules[] | select(.id == $res.ruleId) | .properties."security-severity" // "?") as $sev
+              | "| \($res.ruleId) | \($sev) | \($res.locations[0].physicalLocation.artifactLocation.uri // "-") |"' \
+              trivy-results.sarif | sort -u | head -60 >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Container scan found $count fixable CRITICAL/HIGH vulnerabilities. See the job summary."
+            # One annotation per vulnerable package: "package installed -> fixed (CVEs)".
+            jq -r '[.runs[].results[] | .message.text as $t
+                | { pkg: ($t | capture("Package: (?<v>[^\n]+)").v // "?"),
+                    installed: ($t | capture("Installed Version: (?<v>[^\n]+)").v // "?"),
+                    fixed: ($t | capture("Fixed Version: (?<v>[^\n]+)").v // "?"),
+                    id: .ruleId }]
+              | group_by(.pkg)[]
+              | "::warning::\(.[0].pkg) \(.[0].installed) -> \(.[0].fixed) (\(map(.id) | unique | join(" ")))"' \
+              trivy-results.sarif | head -10
+          fi
+      # 2) Gate: fail the build if anything fixable remains.
+      - name: Fail on fixable CRITICAL/HIGH vulnerabilities
+        run: |
+          count=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+          test "$count" -eq 0
