@@ -56,6 +56,29 @@ spring:
     password: ""
 
 ---
+# Public demo (e.g. Render free tier): in-memory database that resets on restart,
+# Swagger UI on, and self-serve sandbox sign-up so visitors can try the API.
+spring:
+  config:
+    activate:
+      on-profile: demo
+  datasource:
+    url: jdbc:h2:mem:ledgerforge;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
+    username: sa
+    password: ""
+server:
+  port: ${PORT:8080}
+  # The platform's proxy terminates TLS; trust its X-Forwarded-* headers so per-IP rate
+  # limiting sees the real client address and redirects use https.
+  forward-headers-strategy: native
+ledgerforge:
+  sandbox:
+    self-signup: true
+  rate-limit:
+    capacity: 60
+    refill-per-second: 5
+
+---
 spring:
   config:
     activate:
