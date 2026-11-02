@@ -1,3 +1,11 @@
-# Accepted Trivy findings, each with a reason and an expiry. Kept empty unless a finding is a
-# deliberate trade-off.
-misconfigurations: []
+# Accepted Trivy findings, each with a reason and an expiry date (after which CI fails again until reviewed).
+misconfigurations:
+  - id: AWS-0104
+    # Only the EKS module's node security group; our own security groups have no egress rules at all.
+    paths:
+      - "**/node_groups.tf"
+    statement: >-
+      Worker nodes need outbound HTTPS to ECR, STS, EKS and other AWS APIs, through NAT gateways in private
+      subnets. Pod traffic, which shares this security group, is narrowed per workload by default-deny
+      Kubernetes NetworkPolicies (deploy/k8s). Next step: VPC endpoints and an egress firewall.
+    expired_at: 2027-06-30
