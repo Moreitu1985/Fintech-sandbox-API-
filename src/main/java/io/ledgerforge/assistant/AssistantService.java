@@ -6,7 +6,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.ledgerforge.audit.AuditService;
 import io.ledgerforge.common.error.ApiException;
-import io.ledgerforge.security.TokenBucket;
+import io.ledgerforge.common.LedgerMetrics;
+import io.ledgerforge.security.ratelimit.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,9 +20,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 
@@ -76,17 +75,21 @@ public class AssistantService {
     private final AuditService audit;
     private final ObjectMapper json;
     private final JsonNode toolDefinitions;
-    private final Map<UUID, TokenBucket> perTenantLimit = new ConcurrentHashMap<>();
+    private final RateLimiter limiter;
+    private final LedgerMetrics metrics;
     private final Semaphore inFlight;
     private final Clock clock;
 
-    public AssistantService(AssistantProperties props, AssistantTools tools, AuditService audit, ObjectMapper json) {
+    public AssistantService(AssistantProperties props, AssistantTools tools, AuditService audit, ObjectMapper json,
+                            RateLimiter limiter, LedgerMetrics metrics) {
         if (props.maxToolRounds() < 1 || props.requestsPerMinute() < 1 || props.maxConcurrent() < 1
                 || props.maxTokens() < 1) {
             throw new IllegalStateException("ledgerforge.assistant: max-tool-rounds, requests-per-minute, "
                     + "max-concurrent and max-tokens must all be at least 1");
         }
         this.props = props;
+        this.limiter = limiter;
+        this.metrics = metrics;
         this.claude = new AnthropicClient(props);
         this.tools = tools;
         this.audit = audit;
@@ -101,9 +104,9 @@ public class AssistantService {
     }
 
     public Answer ask(UUID tenantId, String question) {
-        TokenBucket bucket = perTenantLimit.computeIfAbsent(tenantId,
-                id -> new TokenBucket(props.requestsPerMinute(), props.requestsPerMinute() / 60.0));
-        if (!bucket.tryConsume()) {
+        // Fail closed: this limit caps paid model calls, so an unavailable limiter must not lift it.
+        if (!limiter.tryAcquire("assistant:" + tenantId, props.requestsPerMinute(),
+                props.requestsPerMinute() / 60.0, false).allowed()) {
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "ASSISTANT_RATE_LIMITED",
                     "Too many assistant questions. Try again in a minute.");
         }
@@ -249,6 +252,7 @@ public class AssistantService {
 
     /** Who asked what, which data the model was given, and what it cost: in the tamper-evident chain. */
     private void record(UUID tenantId, String question, Run run, String outcome) {
+        metrics.assistantQuestion(outcome, run.inputTokens, run.outputTokens);
         String safeQuestion = question.replaceAll("\\p{Cntrl}", " ");
         if (safeQuestion.length() > 300) {
             safeQuestion = safeQuestion.substring(0, 300) + "...";

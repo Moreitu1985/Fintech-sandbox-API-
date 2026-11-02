@@ -1,9 +1,12 @@
 package io.ledgerforge.config;
 
 import io.ledgerforge.common.error.ProblemWriter;
+import io.ledgerforge.common.LedgerMetrics;
 import io.ledgerforge.security.AdminTokenFilter;
 import io.ledgerforge.security.ApiKeyAuthFilter;
+import io.ledgerforge.security.MetricsTokenFilter;
 import io.ledgerforge.security.RateLimitFilter;
+import io.ledgerforge.security.ratelimit.RateLimiter;
 import io.ledgerforge.tenant.TenantService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,11 +25,13 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, TenantService tenants, LedgerForgeProperties props,
-                                            ProblemWriter problems) throws Exception {
+                                            ProblemWriter problems, RateLimiter limiter, LedgerMetrics metrics)
+            throws Exception {
         // Filters are created here, not as @Components, so they run only inside the security chain.
         var apiKeyFilter = new ApiKeyAuthFilter(tenants);
         var adminFilter = new AdminTokenFilter(props.adminToken());
-        var rateLimitFilter = new RateLimitFilter(props.rateLimit(), problems);
+        var metricsFilter = new MetricsTokenFilter(props.metricsToken());
+        var rateLimitFilter = new RateLimitFilter(props.rateLimit(), limiter, problems, metrics);
 
         http
                 // Stateless token API: no cookies or sessions, so CSRF protection does not apply.
@@ -41,6 +46,9 @@ public class SecurityConfig {
                         .referrerPolicy(r -> r.policy(ReferrerPolicy.NO_REFERRER)))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // Read-only metrics token only: not tenant keys, not the admin token (least privilege).
+                        .requestMatchers("/actuator/prometheus", "/actuator/metrics", "/actuator/metrics/**")
+                        .hasRole("METRICS")
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Only has a handler when the demo profile enables self-signup; otherwise 404.
@@ -59,7 +67,8 @@ public class SecurityConfig {
                                         "These credentials cannot access this resource.")))
                 .addFilterBefore(apiKeyFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(adminFilter, ApiKeyAuthFilter.class)
-                .addFilterAfter(rateLimitFilter, AdminTokenFilter.class);
+                .addFilterAfter(metricsFilter, AdminTokenFilter.class)
+                .addFilterAfter(rateLimitFilter, MetricsTokenFilter.class);
 
         return http.build();
     }

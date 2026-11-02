@@ -31,12 +31,12 @@ jobs:
               | head -10 | cut -c1-400 | sed 's/^\[ERROR\] */::error::/'
             exit 1
           fi
-      - name: Require the PostgreSQL tests to have run
+      - name: Require the Docker-backed tests (PostgreSQL, Redis) to have run
         # They skip themselves without Docker (fine on a laptop); in CI that would hide a gap.
         run: |
           set -e
           count=0
-          for f in $(ls target/surefire-reports/TEST-*Postgres*.xml target/surefire-reports/TEST-io.ledgerforge.postgres.*.xml 2>/dev/null | sort -u); do
+          for f in $(ls target/surefire-reports/TEST-*Postgres*.xml target/surefire-reports/TEST-io.ledgerforge.postgres.*.xml target/surefire-reports/TEST-*Redis*.xml 2>/dev/null | sort -u); do
             [ -e "$f" ] || continue
             tests=$(grep -o '<testsuite[^>]*' "$f" | head -1 | grep -o ' tests="[0-9]*"' | grep -o '[0-9]*')
             skipped=$(grep -o '<testsuite[^>]*' "$f" | head -1 | grep -o ' skipped="[0-9]*"' | grep -o '[0-9]*')
@@ -44,7 +44,8 @@ jobs:
             if [ "$skipped" != "0" ]; then echo "::error::$(basename "$f") was skipped"; exit 1; fi
             count=$((count + tests))
           done
-          echo "PostgreSQL tests run: $count"
+          echo "Docker-backed tests run: $count"
+          ls target/surefire-reports/TEST-*Redis*.xml > /dev/null  # the Redis suites must exist too
           test "$count" -gt 0
       - name: Publish test summary
         if: always()

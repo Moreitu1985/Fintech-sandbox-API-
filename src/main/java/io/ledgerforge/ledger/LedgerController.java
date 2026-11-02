@@ -1,5 +1,7 @@
 package io.ledgerforge.ledger;
 
+import io.ledgerforge.common.LedgerMetrics;
+import io.ledgerforge.common.error.ApiException;
 import io.ledgerforge.ledger.dto.LedgerDtos.AccountResponse;
 import io.ledgerforge.ledger.dto.LedgerDtos.CreateAccountRequest;
 import io.ledgerforge.ledger.dto.LedgerDtos.EntryResponse;
@@ -33,8 +35,11 @@ public class LedgerController {
     private final AccountService accounts;
     private final TransferService transfers;
     private final IntegrityService integrity;
+    private final LedgerMetrics metrics;
 
-    public LedgerController(AccountService accounts, TransferService transfers, IntegrityService integrity) {
+    public LedgerController(AccountService accounts, TransferService transfers, IntegrityService integrity,
+                            LedgerMetrics metrics) {
+        this.metrics = metrics;
         this.accounts = accounts;
         this.transfers = transfers;
         this.integrity = integrity;
@@ -79,7 +84,17 @@ public class LedgerController {
             @AuthenticationPrincipal TenantPrincipal caller,
             @Parameter(description = "Unique per logical transfer, 8-64 chars") @RequestHeader("Idempotency-Key") String key,
             @Valid @RequestBody TransferRequest request) {
-        TransferService.Result result = transfers.transfer(caller.tenantId(), key, request);
+        TransferService.Result result;
+        try {
+            result = transfers.transfer(caller.tenantId(), key, request);
+        } catch (ApiException e) {
+            metrics.transfer("rejected", e.code());
+            throw e;
+        } catch (RuntimeException e) {
+            metrics.transfer("error", "INTERNAL");
+            throw e;
+        }
+        metrics.transfer(result.replayed() ? "replayed" : "posted", "none");
         if (result.replayed()) {
             return ResponseEntity.ok().header("Idempotent-Replayed", "true").body(result.transfer());
         }

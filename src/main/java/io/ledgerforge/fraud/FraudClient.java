@@ -9,11 +9,12 @@ public class FraudClient {
 
     private final RestClient http;
 
-    public FraudClient(FraudProperties props) {
+    /** @param builder Spring's auto-configured builder, so calls are traced and timed */
+    public FraudClient(FraudProperties props, RestClient.Builder builder) {
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(props.connectTimeout());
         factory.setReadTimeout(props.readTimeout());
-        this.http = RestClient.builder()
+        this.http = builder
                 .baseUrl(props.url())
                 .requestFactory(factory)
                 .defaultHeader("X-Service-Token", props.token())

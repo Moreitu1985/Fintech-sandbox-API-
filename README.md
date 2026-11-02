@@ -32,7 +32,8 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | Plugins | `TransferPlugin` beans hook into every transfer without touching the core (examples: per-transfer limit, fraud check) |
 | AI ledger assistant | `POST /v1/assistant/ask` answers plain-English questions about your own ledger with Claude, through read-only tools scoped to your tenant ([ADR 0006](docs/adr/0006-ai-assistant-read-only-tools.md)) |
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
-| API security | Hashed API keys, constant-time checks, rate limiting, strict headers, RFC 9457 errors with request ids |
+| API security | Hashed API keys, constant-time checks, rate limits shared across instances in Redis, strict headers, RFC 9457 errors with request ids |
+| Observability | Prometheus metrics (transfers, fraud decisions, assistant tokens, rate limiting, HTTP, DB pool, JVM) behind a read-only metrics token; OpenTelemetry traces of API requests and fraud-service calls ([guide](docs/OBSERVABILITY.md)) |
 
 ## Architecture
 
@@ -61,7 +62,7 @@ Example reasons recorded for a blocked transfer: *"Transfer uses 97% of the avai
 
 Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
 
-Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs all three services together. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
+Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs the ledger, fraud service, PostgreSQL and Redis together. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
 
 ## AI ledger assistant (Phase 2)
 
@@ -183,6 +184,8 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `IdempotencyTest` | Retries move money once; reusing a key with a different body is rejected |
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
 | PostgreSQL suite (`Postgres*Test`, `AppendOnlyHistoryTest`, `PostgresQueriesTest`) | Concurrency, idempotency, tenant isolation and transfer tests re-run on real PostgreSQL 16 via Testcontainers; the database itself refuses to update or delete postings, transfers and audit events; the fraud and assistant queries return correct figures; a blocked transfer's audit evidence survives the rollback. CI fails if these are skipped |
+| `RedisRateLimiterTest`, `RedisRateLimitApiTest` | Against real Redis: burst then 429 with `Retry-After`; two instances share one limit; buckets refill and expire; with Redis down, fails open or closed as asked and a circuit breaker stops further calls |
+| `ObservabilityTest` | Metrics need the read-only metrics token (tenant keys and the admin token are refused); business, HTTP, DB-pool and JVM metrics are exported |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |
 | `FraudCheckPluginTest`, `FraudCheckFailClosedTest` | Features sent to the model are computed correctly; BLOCK moves no money; REVIEW is audited; outages fail open or closed as configured |
@@ -200,6 +203,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 4. [Hash-chained audit log](docs/adr/0004-hash-chained-audit.md)
 5. [Fraud scoring as a synchronous plugin](docs/adr/0005-fraud-scoring-plugin.md)
 6. [AI assistant through read-only, tenant-scoped tools](docs/adr/0006-ai-assistant-read-only-tools.md)
+7. [Rate limits shared across instances in Redis](docs/adr/0007-shared-rate-limiting-in-redis.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -209,7 +213,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
-| 3 | PostgreSQL tests with Testcontainers (done); Redis rate limits, OpenTelemetry, OAuth2 + mTLS, load tests, Kubernetes | In progress |
+| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry (done); OAuth2 + mTLS, load tests, Kubernetes | In progress |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
@@ -220,6 +224,8 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 **AI:** Claude API (tool use) for the ledger assistant
 
 **Fraud service:** Python 3.13 · FastAPI · LightGBM (TreeSHAP explanations) · scikit-learn · pandas · pytest
+
+**Operations:** Redis · Prometheus (Micrometer) · OpenTelemetry
 
 **Delivery and security:** Docker · Docker Compose · GitHub Actions · CodeQL (Java + Python) · Trivy · Dependabot · Render
 

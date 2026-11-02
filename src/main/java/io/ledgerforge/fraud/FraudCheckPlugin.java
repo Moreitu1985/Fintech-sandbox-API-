@@ -1,6 +1,7 @@
 package io.ledgerforge.fraud;
 
 import io.ledgerforge.audit.AuditService;
+import io.ledgerforge.common.LedgerMetrics;
 import io.ledgerforge.common.error.ApiException;
 import io.ledgerforge.ledger.Account;
 import io.ledgerforge.ledger.AccountRepository;
@@ -15,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
 
 /**
  * Scores every customer transfer with the fraud model before money moves. Runs in
@@ -46,9 +48,10 @@ public class FraudCheckPlugin implements TransferPlugin {
     private final FraudFeatureCalculator features;
     private final AccountRepository accounts;
     private final AuditService audit;
+    private final LedgerMetrics metrics;
 
     public FraudCheckPlugin(FraudProperties props, FraudFeatureCalculator features, AccountRepository accounts,
-                            AuditService audit) {
+                            AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder) {
         if (props.url() == null || props.url().isBlank()) {
             throw new IllegalStateException("ledgerforge.plugins.fraud.url is required when the fraud plugin is enabled");
         }
@@ -57,7 +60,8 @@ public class FraudCheckPlugin implements TransferPlugin {
                     + FraudProperties.MIN_TOKEN_LENGTH + " characters");
         }
         this.props = props;
-        this.client = new FraudClient(props);
+        this.client = new FraudClient(props, restClientBuilder);
+        this.metrics = metrics;
         this.features = features;
         this.accounts = accounts;
         this.audit = audit;
@@ -88,6 +92,7 @@ public class FraudCheckPlugin implements TransferPlugin {
         try {
             result = client.score(new FraudModels.ScoreRequest(transfer.reference(), features.compute(transfer, source)));
         } catch (ResourceAccessException | HttpServerErrorException outage) {
+            metrics.fraudDecision("unavailable");
             if (props.failOpen()) {
                 log.warn("Fraud service unavailable, allowing transfer (fail-open): {}", outage.getMessage());
                 return;
@@ -96,12 +101,14 @@ public class FraudCheckPlugin implements TransferPlugin {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_CHECK_UNAVAILABLE",
                     "The fraud check is temporarily unavailable. Retry later with the same Idempotency-Key.");
         } catch (RuntimeException misconfiguration) {
+            metrics.fraudDecision("error");
             log.error("Fraud check failed in a way an outage does not explain (token, contract or response "
                     + "problem); refusing transfer", misconfiguration);
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_CHECK_UNAVAILABLE",
                     "The fraud check could not be completed. The platform operator has been alerted.");
         }
 
+        metrics.fraudDecision(result.blocked() ? "BLOCK" : result.needsReview() ? "REVIEW" : "ALLOW"); // fixed tag set
         String evidence = "from=" + transfer.fromAccountId() + ";to=" + transfer.toAccountId()
                 + ";amount=" + transfer.amount() + ";currency=" + transfer.currency()
                 + ";score=" + result.score() + ";model=" + result.modelVersion()
