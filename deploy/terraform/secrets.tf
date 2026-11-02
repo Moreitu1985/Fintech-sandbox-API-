@@ -28,6 +28,11 @@ resource "random_password" "fraud_service_token" {
   special = false
 }
 
+# AES-256 key that encrypts webhook signing secrets in the database.
+resource "random_bytes" "webhook_encryption_key" {
+  length = 32
+}
+
 # RSA key that signs OAuth access tokens (ADR 0008); shared by all API replicas.
 resource "tls_private_key" "oauth_signing" {
   algorithm = "RSA"
@@ -44,9 +49,10 @@ locals {
       auth_token = random_password.redis.result
     })
     app = jsonencode({
-      admin_token         = random_password.admin_token.result
-      metrics_token       = random_password.metrics_token.result
-      fraud_service_token = random_password.fraud_service_token.result
+      admin_token            = random_password.admin_token.result
+      metrics_token          = random_password.metrics_token.result
+      fraud_service_token    = random_password.fraud_service_token.result
+      webhook_encryption_key = random_bytes.webhook_encryption_key.base64
     })
     oauth-signing-key = tls_private_key.oauth_signing.private_key_pem_pkcs8
   }

@@ -27,6 +27,7 @@ scrape_configs:
 | `ledgerforge_fraud_decisions_total` | `decision` (ALLOW, REVIEW, BLOCK, unavailable, error) | Fraud-model decisions |
 | `ledgerforge_assistant_questions_total` | `outcome` | AI assistant questions |
 | `ledgerforge_assistant_tokens_total` | `direction` (input, output) | Claude tokens used (cost) |
+| `ledgerforge_webhook_deliveries_total` | `outcome` (succeeded, retrying, failed, cancelled) | Webhook delivery attempts; `failed` means a delivery gave up after its last retry |
 | `ledgerforge_rate_limited_total` | `client` (api_key, ip) | Requests refused by the rate limiter |
 | `ledgerforge_rate_limiter_errors_total` | | Redis unavailable: decisions taken without the shared store (alert on any) |
 
@@ -41,6 +42,7 @@ Spring also exports HTTP latency (`http_server_requests_seconds`), outbound call
 | Fraud service failing | `rate(ledgerforge_fraud_decisions_total{decision=~"unavailable|error"}[5m]) > 0` |
 | Block rate jumps | BLOCK share of decisions doubles against the previous day |
 | Assistant cost | `increase(ledgerforge_assistant_tokens_total[1h])` above budget |
+| Webhook receivers failing | `rate(ledgerforge_webhook_deliveries_total{outcome="failed"}[1h]) > 0` |
 | Abuse | `rate(ledgerforge_rate_limited_total[5m])` sustained |
 | Rate limiter degraded | `increase(ledgerforge_rate_limiter_errors_total[5m]) > 0` |
 | Latency | p99 of `http_server_requests_seconds{uri="/v1/transfers"}` above 500 ms |

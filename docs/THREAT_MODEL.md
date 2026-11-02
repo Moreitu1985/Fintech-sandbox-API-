@@ -59,7 +59,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | API4 Unrestricted resource consumption | Rate limits, page caps, validation |
 | API5 Broken function level authorization | `/admin` vs `/v1` roles; default deny |
 | API6 Unrestricted access to sensitive business flows | Per-transfer limit plugin; ML fraud-check plugin (BLOCK / REVIEW) |
-| API7 Server-side request forgery | No user-supplied URLs are fetched (webhooks in Phase 4 will use an allow-list) |
+| API7 Server-side request forgery | Webhook URLs are the only user-supplied URLs called. HTTPS on port 443 only; every resolved address must be public (no loopback, private, link-local/metadata, CGNAT, unique-local IPv6 or IPv4-mapped forms), checked at registration and again before every delivery; redirects are not followed; response bodies are never read. In Kubernetes, egress NetworkPolicies also block private ranges ([ADR 0010](adr/0010-webhooks.md)) |
 | API8 Security misconfiguration | Secure headers, no default users, Swagger off in prod, CodeQL in CI |
 | API9 Improper inventory management | Versioned `/v1` paths, OpenAPI spec |
 | API10 Unsafe consumption of APIs | Fraud-service responses are typed and validated, with timeouts and a defined failure policy; partner connectors follow the same rule (Phase 5) |
@@ -75,4 +75,5 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - In the AWS deployment the API connects to PostgreSQL as the database owner; a separate least-privilege runtime role is planned. Database triggers still refuse updates and deletes of postings, transfers and audit events.
 - Worker nodes have unrestricted outbound HTTPS through NAT (pods are narrowed by NetworkPolicies); VPC endpoints and an egress firewall would narrow it further.
 - Terraform state holds the generated secrets, so the state bucket must be encrypted and tightly restricted.
+- Webhook DNS rebinding: an address is checked just before each send, but a host could change its DNS answer between the check and the connection. The Kubernetes egress policy (no private ranges) is the second layer; pinning the checked address for the connection is a next step.
 - Revoking an API key doesn't recall access tokens already issued from it; they expire within 15 minutes.

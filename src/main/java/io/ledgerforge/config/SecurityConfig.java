@@ -77,6 +77,12 @@ public class SecurityConfig {
                         .requestMatchers("/v1/assistant/**").access(AuthorizationManagers.allOf(
                                 AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.ASSISTANT)),
                                 AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.LEDGER_READ))))
+                        // A webhook delivers ledger data, so registering or changing one needs ledger:read too.
+                        .requestMatchers(HttpMethod.GET, "/v1/webhooks", "/v1/webhooks/**")
+                        .hasAuthority(Scopes.authority(Scopes.LEDGER_READ))
+                        .requestMatchers("/v1/webhooks", "/v1/webhooks/**").access(AuthorizationManagers.allOf(
+                                AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.LEDGER_WRITE)),
+                                AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.LEDGER_READ))))
                         .requestMatchers(HttpMethod.GET, "/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_READ))
                         .requestMatchers(HttpMethod.HEAD, "/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_READ))
                         .requestMatchers("/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_WRITE))

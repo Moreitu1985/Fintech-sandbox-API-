@@ -70,6 +70,7 @@ jobs:
           SPRING_DATASOURCE_PASSWORD=load-test-only \
           LEDGERFORGE_ADMIN_TOKEN="$ADMIN_TOKEN" \
           LEDGERFORGE_OAUTH_SIGNING_KEY_FILE="$RUNNER_TEMP/secrets/oauth.key" \
+          LEDGERFORGE_WEBHOOKS_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
           LEDGERFORGE_RATELIMIT_CAPACITY=1000000 \
           LEDGERFORGE_RATELIMIT_REFILLPERSECOND=1000000 \
             nohup java -XX:MaxRAMPercentage=50 -jar target/ledgerforge-*.jar > "$RUNNER_TEMP/api.log" 2>&1 &

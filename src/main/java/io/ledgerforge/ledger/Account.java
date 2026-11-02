@@ -51,7 +51,7 @@ public class Account {
         this.currency = currency;
         this.allowNegative = allowNegative;
         this.balance = 0;
-        this.createdAt = Instant.now();
+        this.createdAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS); // the database's precision
     }
 
     /** Overflow throws rather than silently wrapping around. */

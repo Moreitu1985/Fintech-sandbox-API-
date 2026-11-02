@@ -55,7 +55,7 @@ public class LedgerTransaction {
         this.currency = currency;
         this.reference = reference;
         this.description = description;
-        this.createdAt = Instant.now();
+        this.createdAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS); // the database's precision
     }
 
     public UUID getId() {
