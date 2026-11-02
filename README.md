@@ -66,9 +66,9 @@ curl -s localhost:8080/v1/accounts -H "Authorization: Bearer eyJ..."
 |---|---|
 | `ledger:read` | `GET` on accounts, statements, transfers, integrity |
 | `ledger:write` | Opening accounts and making transfers |
-| `assistant` | The AI ledger assistant |
+| `assistant` | The AI ledger assistant (also needs `ledger:read`, because the assistant reads the ledger for you) |
 
-A token carries only the scopes asked for, so a reporting tool can hold read-only access. Tokens are RS256-signed; other services can verify them with the public key at `GET /oauth/jwks.json`. Revoking the API key stops new tokens immediately, and existing ones expire within 15 minutes.
+A token carries only the scopes asked for, so a reporting tool can hold read-only access. Send token-request parameters in the body, never the URL; each client can request 10 tokens a minute, so reuse a token until it nears expiry. Tokens are RS256-signed and typed `at+jwt` (RFC 9068); other services can verify them with the public key at `GET /oauth/jwks.json`. Revoking the API key stops new tokens immediately, and existing ones expire within 15 minutes.
 
 ## AI fraud detection (Phase 2)
 
@@ -84,7 +84,7 @@ Example reasons recorded for a blocked transfer: *"Transfer uses 97% of the avai
 
 Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
 
-Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs the ledger, fraud service, PostgreSQL and Redis together, with **mutual TLS** between the ledger and the fraud service: a one-shot `certs` service creates a private CA, the fraud service accepts only the ledger's client certificate, and the ledger accepts only the fraud service's server certificate. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
+Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs the ledger, fraud service, PostgreSQL and Redis together, with **mutual TLS** between the ledger and the fraud service: a one-shot `certs` service creates a private CA used only for this link, the fraud service accepts only client certificates from that CA, and the ledger accepts only a server certificate from it. Each container can read only its own private key. A certificate failure always refuses the transfer, even with `FRAUD_FAIL_OPEN=true`. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
 
 ## AI ledger assistant (Phase 2)
 
@@ -209,8 +209,8 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
 | PostgreSQL suite (`Postgres*Test`, `AppendOnlyHistoryTest`, `PostgresQueriesTest`) | Concurrency, idempotency, tenant isolation and transfer tests re-run on real PostgreSQL 16 via Testcontainers; the database itself refuses to update or delete postings, transfers and audit events; the fraud and assistant queries return correct figures; a blocked transfer's audit evidence survives the rollback. CI fails if these are skipped |
 | `RedisRateLimiterTest`, `RedisRateLimitApiTest` | Against real Redis: burst then 429 with `Retry-After`; two instances share one limit; buckets refill and expire; with Redis down, fails open or closed as asked and a circuit breaker stops further calls |
-| `OAuthTokenTest` | Client-credentials tokens: claims, 15-minute expiry, scopes (read-only can't write), tenant isolation, RFC 6749 errors, revoked keys get no tokens; tampered, expired, wrong-audience and foreign-key tokens are rejected; JWKS has no private parts |
-| `FraudMtls*Test`, `fraud-service/tests/test_mtls.py` | Mutual TLS: the trusted pair works; the ledger refuses an impostor server; the fraud service refuses an untrusted client certificate or none at all |
+| `OAuthTokenTest` | Client-credentials tokens: claims, 15-minute expiry, scopes (read-only can't write; `assistant` alone can't read), tenant isolation, RFC 6749 errors, no credentials in the URL, per-client token limit, revoked keys get no tokens; tampered, expired, untyped, wrong-audience, foreign-key and lifetime-less tokens are rejected; JWKS has no private parts |
+| `FraudMtls*Test`, `fraud-service/tests/test_mtls.py` | Mutual TLS: the trusted pair works; the ledger refuses an impostor server and the fraud service refuses an untrusted client certificate or none at all, and in both cases the transfer is refused even with fail-open on; partial TLS settings never fall back to plain HTTP |
 | `ObservabilityTest` | Metrics need the read-only metrics token (tenant keys and the admin token are refused); business, HTTP, DB-pool and JVM metrics are exported |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |

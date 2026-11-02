@@ -43,11 +43,11 @@ final class MtlsSupport {
 
     /** The ledger's side: an SSL bundle named "fraud-client" with its client cert and the CA it trusts. */
     static void ledgerProperties(DynamicPropertyRegistry registry, FakeFraudService fraud, String clientCert,
-                                 String trustedServerCa) {
+                                 String trustedServerCa, boolean failOpen) {
         registry.add("ledgerforge.plugins.fraud.enabled", () -> "true");
         registry.add("ledgerforge.plugins.fraud.url", fraud::url);
         registry.add("ledgerforge.plugins.fraud.token", () -> FakeFraudService.TOKEN);
-        registry.add("ledgerforge.plugins.fraud.fail-open", () -> "false"); // TLS failures must be visible
+        registry.add("ledgerforge.plugins.fraud.fail-open", () -> Boolean.toString(failOpen));
         registry.add("ledgerforge.plugins.fraud.ssl-bundle", () -> "fraud-client");
         registry.add("spring.ssl.bundle.pem.fraud-client.keystore.certificate", () -> "classpath:mtls/" + clientCert + ".crt");
         registry.add("spring.ssl.bundle.pem.fraud-client.keystore.private-key", () -> "classpath:mtls/" + clientCert + ".key");

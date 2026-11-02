@@ -90,3 +90,18 @@ def test_tls_without_a_client_ca_is_refused(monkeypatch):
     monkeypatch.delenv("FRAUD_TLS_CLIENT_CA", raising=False)
     with pytest.raises(RuntimeError, match="mutual TLS"):
         tls_options()
+
+
+@pytest.mark.parametrize("only", ["FRAUD_TLS_CERT", "FRAUD_TLS_KEY", "FRAUD_TLS_CLIENT_CA"])
+def test_partial_tls_settings_never_fall_back_to_plain_http(monkeypatch, only):
+    for name in ("FRAUD_TLS_CERT", "FRAUD_TLS_KEY", "FRAUD_TLS_CLIENT_CA"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(only, "x")
+    with pytest.raises(RuntimeError, match="mutual TLS"):
+        tls_options()
+
+
+def test_no_tls_settings_means_plain_http(monkeypatch):
+    for name in ("FRAUD_TLS_CERT", "FRAUD_TLS_KEY", "FRAUD_TLS_CLIENT_CA"):
+        monkeypatch.delenv(name, raising=False)
+    assert tls_options() == {}

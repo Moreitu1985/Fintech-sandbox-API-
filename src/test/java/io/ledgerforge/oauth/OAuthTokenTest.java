@@ -32,6 +32,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -218,6 +219,7 @@ class OAuthTokenTest extends IntegrationTestBase {
                 .issuer("ledgerforge").audience(List.of(audience))
                 .subject(tenant.keyId().toString())
                 .claims(c -> c.putAll(Map.of("tid", tenant.id().toString(), "scope", "ledger:read")))
+                .id(UUID.randomUUID().toString())
                 .issuedAt(issuedAt).expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
                 .build();
     }
@@ -229,5 +231,80 @@ class OAuthTokenTest extends IntegrationTestBase {
     private String sign(JwtEncoder encoder, JwtClaimsSet claims, String type) {
         JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(tokenSigningKey.getKeyID()).type(type).build();
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    @Test
+    void assistantNeedsLedgerReadToo() throws Exception {
+        // The assistant reads the ledger for the caller, so "assistant" alone must not unlock ledger data.
+        mvc.perform(post("/v1/assistant/ask").header("Authorization", "Bearer " + token("assistant"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"hi\"}"))
+                .andExpect(status().isForbidden());
+        // With both scopes authorization passes (the assistant itself is off in tests, hence 404).
+        mvc.perform(post("/v1/assistant/ask").header("Authorization", "Bearer " + token("assistant ledger:read"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"hi\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void headCountsAsRead() throws Exception {
+        mvc.perform(head("/v1/accounts").header("Authorization", "Bearer " + token("ledger:write")))
+                .andExpect(status().isForbidden());
+        mvc.perform(head("/v1/accounts").header("Authorization", "Bearer " + token("ledger:read")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void credentialsInTheUrlRepeatedParametersAndMixedMethodsAreRefused() throws Exception {
+        mvc.perform(post("/oauth/token?client_secret=" + tenant.apiKey())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED).param("grant_type", "client_credentials"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+        mvc.perform(post("/oauth/token").contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "client_credentials", "client_credentials")
+                        .param("client_id", tenant.keyId().toString()).param("client_secret", tenant.apiKey()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+        String basic = Base64.getEncoder().encodeToString(
+                (tenant.keyId() + ":" + tenant.apiKey()).getBytes(StandardCharsets.UTF_8));
+        mvc.perform(post("/oauth/token").header("Authorization", "Basic " + basic)
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "client_credentials").param("client_id", UUID.randomUUID().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+    }
+
+    @Test
+    void tokenRequestsAreLimitedPerClient() throws Exception {
+        for (int i = 0; i < TokenService.TOKENS_PER_MINUTE; i++) {
+            requestToken(tenant.keyId().toString(), tenant.apiKey(), null).andExpect(status().isOk());
+        }
+        requestToken(tenant.keyId().toString(), tenant.apiKey(), null)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "60"))
+                .andExpect(jsonPath("$.error").value("slow_down"));
+        // Another client is unaffected.
+        Tenant other = newTenant();
+        requestToken(other.keyId().toString(), other.apiKey(), null).andExpect(status().isOk());
+    }
+
+    @Test
+    void tokensWithoutLifetimeClaimsOrWithTooLongALifetimeAreRejected() throws Exception {
+        Instant now = Instant.now();
+        JwtClaimsSet noExpiry = JwtClaimsSet.builder()
+                .issuer("ledgerforge").audience(List.of("ledgerforge-api")).subject(tenant.keyId().toString())
+                .claims(c -> c.putAll(Map.of("tid", tenant.id().toString(), "scope", "ledger:read")))
+                .id(UUID.randomUUID().toString()).issuedAt(now).build();
+        JwtClaimsSet noId = JwtClaimsSet.builder()
+                .issuer("ledgerforge").audience(List.of("ledgerforge-api")).subject(tenant.keyId().toString())
+                .claims(c -> c.putAll(Map.of("tid", tenant.id().toString(), "scope", "ledger:read")))
+                .issuedAt(now).expiresAt(now.plus(Duration.ofMinutes(5))).build();
+        JwtClaimsSet tooLong = JwtClaimsSet.builder()
+                .issuer("ledgerforge").audience(List.of("ledgerforge-api")).subject(tenant.keyId().toString())
+                .claims(c -> c.putAll(Map.of("tid", tenant.id().toString(), "scope", "ledger:read")))
+                .id(UUID.randomUUID().toString()).issuedAt(now).expiresAt(now.plus(Duration.ofDays(30))).build();
+        for (JwtClaimsSet claims : List.of(noExpiry, noId, tooLong)) {
+            mvc.perform(get("/v1/accounts").header("Authorization", "Bearer " + sign(ourEncoder, claims)))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 }

@@ -36,13 +36,13 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | **D**enial of service | Request flood | Token-bucket limits per key and per IP, shared across instances in Redis (atomic Lua script, Redis clock); API limits fail open and the AI assistant's limit fails closed if Redis is down, behind a circuit breaker (ADR 0007) | Implemented |
 | Denial of service | Oversized or malicious input | Bean Validation limits on every field; amount ceiling; paging capped at 100 | Implemented |
 | Tampering | Fraudulent transfer from a taken-over account | ML fraud check before money moves: BLOCK refuses, REVIEW is audited with reasons | Implemented (Phase 2) |
-| Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Mutual TLS with a private CA (each side verifies the other's certificate; no plain-HTTP downgrade), plus a 32+ char service token; service only on the internal network | Implemented (ADR 0008) |
+| Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Mutual TLS with a CA dedicated to this link (each side verifies the other; no plain-HTTP downgrade; a certificate failure always refuses the transfer), plus a 32+ char service token; service only on the internal network; each container reads only its own key | Implemented (ADR 0008) |
 | Denial of service | Fraud service slow or down stalls payments | 500 ms / 1.5 s timeouts; explicit fail-open or fail-closed policy | Implemented |
 | Information disclosure | AI assistant reveals another tenant's data | Tools take the tenant from the API key, never from the model; foreign ids look missing; no free-form SQL | Implemented (Phase 2) |
 | Tampering / Elevation | Prompt injection in account names, descriptions or fraud reasons steers the assistant | Only read-only tools exist; results wrapped as untrusted data; links and images stripped from answers; output goes only to the same caller | Implemented |
 | Denial of service | AI assistant used to run up model costs | 10 questions/min per tenant, 8 in flight per server, 5 model calls and 4 tool calls per round, 60k characters of tool data, capped output, 60 s deadline; off by default | Implemented |
 | **E**levation of privilege | Tenant key used on admin endpoints | Separate roles; admin requires the admin token | Implemented |
-| Elevation of privilege | A client needing read access holds write access | OAuth scopes `ledger:read`, `ledger:write`, `assistant` enforced per route; a token carries only the scopes requested | Implemented |
+| Elevation of privilege | A client needing read access holds write access | OAuth scopes `ledger:read`, `ledger:write`, `assistant` (which also needs `ledger:read`) enforced per route and method; a token carries only the scopes requested | Implemented |
 | Elevation of privilege | Unknown or forgotten endpoints exposed | Default-deny authorization rule; only health is public | Implemented |
 
 ## OWASP API Security Top 10 (2023)

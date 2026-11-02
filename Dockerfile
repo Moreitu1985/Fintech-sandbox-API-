@@ -9,7 +9,7 @@ RUN mvn -q -B package -DskipTests
 # Runtime stage: JRE only, non-root user
 FROM eclipse-temurin:21-jre-alpine
 # Apply OS security patches released after the base image was built.
-RUN apk upgrade --no-cache && addgroup -S app && adduser -S app -G app
+RUN apk upgrade --no-cache && addgroup -S -g 10002 app && adduser -S -u 10002 -G app app
 WORKDIR /app
 COPY --from=build /src/target/ledgerforge-*.jar app.jar
 USER app

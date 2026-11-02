@@ -17,6 +17,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
+
+import javax.net.ssl.SSLException;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -94,6 +96,14 @@ public class FraudCheckPlugin implements TransferPlugin {
         try {
             result = client.score(new FraudModels.ScoreRequest(transfer.reference(), features.compute(transfer, source)));
         } catch (ResourceAccessException | HttpServerErrorException outage) {
+            if (causedByTls(outage)) {
+                // A certificate problem (impostor, wrong CA, expired cert) is a security event, not an outage:
+                // never let it switch scoring off, whatever the fail-open setting says.
+                metrics.fraudDecision("error");
+                log.error("TLS handshake with the fraud service failed; refusing transfer: {}", outage.getMessage());
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_CHECK_UNAVAILABLE",
+                        "The fraud check could not be completed. The platform operator has been alerted.");
+            }
             metrics.fraudDecision("unavailable");
             if (props.failOpen()) {
                 log.warn("Fraud service unavailable, allowing transfer (fail-open): {}", outage.getMessage());
@@ -126,6 +136,15 @@ public class FraudCheckPlugin implements TransferPlugin {
         if (result.needsReview()) {
             audit.append(transfer.tenantId(), "FRAUD_REVIEW", evidence);
         }
+    }
+
+    private static boolean causedByTls(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SSLException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String truncate(String s, int max) {

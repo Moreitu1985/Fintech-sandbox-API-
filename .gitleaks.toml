@@ -1,0 +1,8 @@
+# Secret-scanner allowlist (gitleaks; the same paths can be excluded in trufflehog/GitHub secret scanning).
+# These keys exist only to exercise mutual TLS in tests; their CA keys were deleted and they protect nothing.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test-only mTLS fixtures (see src/test/resources/mtls/README.md)"
+paths = ['''src/test/resources/mtls/.*\.key''']

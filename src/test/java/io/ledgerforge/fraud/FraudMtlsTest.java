@@ -18,7 +18,7 @@ class FraudMtlsTest extends IntegrationTestBase {
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        MtlsSupport.ledgerProperties(registry, FRAUD, "ledger-client", "ca");
+        MtlsSupport.ledgerProperties(registry, FRAUD, "ledger-client", "ca", false);
     }
 
     @AfterAll

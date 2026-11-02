@@ -12,7 +12,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
@@ -33,23 +32,25 @@ public class TokenController {
     }
 
     @Operation(summary = "Exchange client credentials for a short-lived access token",
-            description = "OAuth 2.0 client_credentials grant. Authenticate with HTTP Basic (client_id = API key id, "
-                    + "client_secret = API key) or with client_id/client_secret form fields. Optional `scope`: any of "
+            description = "OAuth 2.0 client_credentials grant. Send parameters in the form body (never the URL). "
+                    + "Authenticate with HTTP Basic (client_id = API key id, client_secret = API key) or with "
+                    + "client_id/client_secret form fields, not both. Optional `scope`: any of "
                     + "ledger:read ledger:write assistant (default: all). Use the token as `Authorization: Bearer`.")
     @SecurityRequirements
     @PostMapping(value = "/oauth/token", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-    public ResponseEntity<Map<String, Object>> token(HttpServletRequest request,
-                                                     @RequestParam(name = "grant_type", required = false) String grantType,
-                                                     @RequestParam(name = "scope", required = false) String scope,
-                                                     @RequestParam(name = "client_id", required = false) String formId,
-                                                     @RequestParam(name = "client_secret", required = false) String formSecret) {
-        String clientId = formId;
-        String clientSecret = formSecret;
+    public ResponseEntity<Map<String, Object>> token(HttpServletRequest request) {
+        if (request.getQueryString() != null) {
+            // Anything in the URL ends up in access and proxy logs; an API key must never travel there.
+            throw invalidRequest("Send parameters in the request body, not the URL");
+        }
+        String grantType = single(request, "grant_type");
+        String scope = single(request, "scope");
+        String clientId = single(request, "client_id");
+        String clientSecret = single(request, "client_secret");
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authorization != null && authorization.regionMatches(true, 0, "Basic ", 0, 6)) {
-            if (formSecret != null) {
-                throw new TokenService.OAuthError(org.springframework.http.HttpStatus.BAD_REQUEST, "invalid_request",
-                        "Use one client authentication method, not both");
+            if (clientId != null || clientSecret != null) {
+                throw invalidRequest("Use one client authentication method, not both");
             }
             String[] pair = decodeBasic(authorization.substring(6).trim());
             clientId = pair[0];
@@ -66,6 +67,22 @@ public class TokenController {
                         "scope", issued.scope()));
     }
 
+    /** RFC 6749 3.2: a parameter must not appear more than once. */
+    private static String single(HttpServletRequest request, String name) {
+        String[] values = request.getParameterValues(name);
+        if (values == null) {
+            return null;
+        }
+        if (values.length > 1) {
+            throw invalidRequest("Parameter '" + name + "' must not be repeated");
+        }
+        return values[0];
+    }
+
+    private static TokenService.OAuthError invalidRequest(String description) {
+        return new TokenService.OAuthError(org.springframework.http.HttpStatus.BAD_REQUEST, "invalid_request", description);
+    }
+
     @Operation(summary = "Public keys for verifying access tokens (JWKS)")
     @SecurityRequirements
     @GetMapping(value = "/oauth/jwks.json", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -78,6 +95,9 @@ public class TokenController {
         var response = ResponseEntity.status(e.status()).cacheControl(CacheControl.noStore());
         if (e.status().value() == 401) {
             response.header(HttpHeaders.WWW_AUTHENTICATE, "Basic realm=\"ledgerforge\"");
+        }
+        if (e.status().value() == 429) {
+            response.header(HttpHeaders.RETRY_AFTER, "60");
         }
         return response.body(Map.of("error", e.error(), "error_description", e.getMessage()));
     }

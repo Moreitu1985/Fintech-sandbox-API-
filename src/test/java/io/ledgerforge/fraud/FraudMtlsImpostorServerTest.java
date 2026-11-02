@@ -15,7 +15,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * A service pretending to be the fraud service, with a certificate from a CA the ledger doesn't trust,
  * never receives a transfer and can't approve one. (It accepts the ledger's certificate, so the
- * refusal is the ledger's own server verification.)
+ * refusal is the ledger's own server verification.) Fail-open is ON here: a certificate failure is a
+ * security event, so the transfer is refused anyway instead of going through unscored.
  */
 class FraudMtlsImpostorServerTest extends IntegrationTestBase {
 
@@ -23,7 +24,7 @@ class FraudMtlsImpostorServerTest extends IntegrationTestBase {
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        MtlsSupport.ledgerProperties(registry, IMPOSTOR, "ledger-client", "ca");
+        MtlsSupport.ledgerProperties(registry, IMPOSTOR, "ledger-client", "ca", true);
     }
 
     @AfterAll

@@ -45,8 +45,17 @@ public class OAuthConfig {
     private static final Pattern JWT_SHAPE = Pattern.compile("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$");
 
     @Bean
-    RSAKey tokenSigningKey(OAuthProperties props) {
-        return SigningKeys.load(props.signingKey());
+    RSAKey tokenSigningKey(OAuthProperties props) throws java.io.IOException {
+        String pem = props.signingKey();
+        if ((pem == null || pem.isBlank()) && props.signingKeyFile() != null && !props.signingKeyFile().isBlank()) {
+            pem = java.nio.file.Files.readString(java.nio.file.Path.of(props.signingKeyFile()));
+        }
+        if ((pem == null || pem.isBlank()) && props.requireSigningKey()) {
+            throw new IllegalStateException("No OAuth signing key: set LEDGERFORGE_OAUTH_SIGNING_KEY or "
+                    + "LEDGERFORGE_OAUTH_SIGNING_KEY_FILE. A generated key would break tokens on restart and "
+                    + "across instances.");
+        }
+        return SigningKeys.load(pem);
     }
 
     @Bean
@@ -70,8 +79,15 @@ public class OAuthConfig {
         OAuth2TokenValidator<Jwt> tenant = jwt -> isUuid(jwt.getClaimAsString(TENANT_CLAIM)) && isUuid(jwt.getSubject())
                 ? OAuth2TokenValidatorResult.success()
                 : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "missing tenant", null));
+        // exp/iat/jti must exist (the default timestamp check passes a token with no exp at all),
+        // and no token may claim to live longer than the configured lifetime.
+        OAuth2TokenValidator<Jwt> required = jwt -> jwt.getExpiresAt() != null && jwt.getIssuedAt() != null
+                && jwt.getId() != null
+                && !jwt.getExpiresAt().isAfter(jwt.getIssuedAt().plus(props.tokenTtl()))
+                ? OAuth2TokenValidatorResult.success()
+                : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "missing or invalid lifetime", null));
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
-                JwtValidators.createDefaultWithIssuer(props.issuer()), audience, tenant));
+                JwtValidators.createDefaultWithIssuer(props.issuer()), audience, tenant, required));
         return decoder;
     }
 

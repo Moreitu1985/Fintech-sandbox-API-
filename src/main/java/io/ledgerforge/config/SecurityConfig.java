@@ -13,6 +13,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.authorization.AuthorityAuthorizationManager;
+import org.springframework.security.authorization.AuthorizationManagers;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -71,8 +73,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/oauth/jwks.json").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         // Scopes: API keys hold all three; access tokens only what they were issued with.
-                        .requestMatchers("/v1/assistant/**").hasAuthority(Scopes.authority(Scopes.ASSISTANT))
+                        // The assistant reads the ledger for you, so it needs ledger:read as well as assistant.
+                        .requestMatchers("/v1/assistant/**").access(AuthorizationManagers.allOf(
+                                AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.ASSISTANT)),
+                                AuthorityAuthorizationManager.hasAuthority(Scopes.authority(Scopes.LEDGER_READ))))
                         .requestMatchers(HttpMethod.GET, "/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_READ))
+                        .requestMatchers(HttpMethod.HEAD, "/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_READ))
                         .requestMatchers("/v1/**").hasAuthority(Scopes.authority(Scopes.LEDGER_WRITE))
                         .anyRequest().denyAll())
                 .exceptionHandling(e -> e

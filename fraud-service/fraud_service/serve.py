@@ -19,13 +19,14 @@ import uvicorn
 
 def tls_options() -> dict:
     cert = os.environ.get("FRAUD_TLS_CERT")
-    if not cert:
-        return {}
     key = os.environ.get("FRAUD_TLS_KEY")
     client_ca = os.environ.get("FRAUD_TLS_CLIENT_CA")
-    if not key or not client_ca:
-        raise RuntimeError("FRAUD_TLS_CERT is set, so FRAUD_TLS_KEY and FRAUD_TLS_CLIENT_CA are required "
-                           "(TLS here always means mutual TLS)")
+    if not (cert or key or client_ca):
+        return {}
+    if not (cert and key and client_ca):
+        # A partial TLS setup must never fall back to plain HTTP.
+        raise RuntimeError("FRAUD_TLS_CERT, FRAUD_TLS_KEY and FRAUD_TLS_CLIENT_CA must all be set "
+                           "(TLS here always means mutual TLS) or none of them")
     return {"ssl_certfile": cert, "ssl_keyfile": key, "ssl_ca_certs": client_ca, "ssl_cert_reqs": ssl.CERT_REQUIRED}
 
 

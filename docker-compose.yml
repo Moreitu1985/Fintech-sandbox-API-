@@ -16,6 +16,8 @@ services:
   api:
     build: .
     depends_on:
+      certs:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       fraud:
@@ -32,10 +34,12 @@ services:
       # Mutual TLS to the fraud service: client certificate + the CA that signed the server certificate.
       FRAUD_SERVICE_URL: https://fraud:8090
       FRAUD_SSL_BUNDLE: fraudclient
-      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_KEYSTORE_CERTIFICATE: file:/certs/ledger-client.crt
-      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_KEYSTORE_PRIVATEKEY: file:/certs/ledger-client.key
-      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_TRUSTSTORE_CERTIFICATE: file:/certs/ca.crt
-      LEDGERFORGE_OAUTH_SIGNING_KEY: ${LEDGERFORGE_OAUTH_SIGNING_KEY:-}
+      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_KEYSTORE_CERTIFICATE: file:/certs/api/ledger-client.crt
+      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_KEYSTORE_PRIVATEKEY: file:/certs/api/ledger-client.key
+      SPRING_SSL_BUNDLE_PEM_FRAUDCLIENT_TRUSTSTORE_CERTIFICATE: file:/certs/api/ca.crt
+      # Token-signing key as a file (created by the certs service); the prod profile refuses to start without one.
+      LEDGERFORGE_OAUTH_SIGNING_KEY_FILE: /certs/api/oauth-signing.key
+      FRAUD_FAIL_OPEN: "false"   # this stack has the fraud service; refuse transfers it can't score
       FRAUD_SERVICE_TOKEN: ${FRAUD_SERVICE_TOKEN:?Set FRAUD_SERVICE_TOKEN in .env}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/ledgerforge
       SPRING_DATASOURCE_USERNAME: ledgerforge
@@ -62,7 +66,24 @@ services:
   # in production they come from your PKI or secrets manager).
   certs:
     image: alpine:3.20
-    command: ["sh", "-c", "apk add --no-cache openssl >/dev/null && sh /scripts/generate-dev-certs.sh /certs && chmod 0644 /certs/*.crt /certs/*.key && rm -f /certs/ca.key"]
+    # Each service gets its own folder, readable only by its own user (fraud: UID 10001, api: UID 10002),
+    # so neither container can read the other's private key. The CA key is deleted after signing.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        [ -f /certs/api/ledger-client.crt ] && { echo "certificates already exist"; exit 0; }
+        apk add --no-cache openssl >/dev/null
+        sh /scripts/generate-dev-certs.sh /tmp/gen
+        mkdir -p /certs/fraud /certs/api
+        cp /tmp/gen/fraud-server.crt /tmp/gen/fraud-server.key /tmp/gen/ca.crt /certs/fraud/
+        cp /tmp/gen/ledger-client.crt /tmp/gen/ledger-client.key /tmp/gen/ca.crt /certs/api/
+        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /certs/api/oauth-signing.key 2>/dev/null
+        rm -rf /tmp/gen
+        chown -R 10001:10001 /certs/fraud && chown -R 10002:10002 /certs/api
+        chmod 0500 /certs/fraud /certs/api
+        chmod 0400 /certs/fraud/*.key /certs/api/*.key && chmod 0444 /certs/fraud/*.crt /certs/api/*.crt
     volumes:
       - ./scripts:/scripts:ro
       - certs:/certs
@@ -74,9 +95,9 @@ services:
         condition: service_completed_successfully
     environment:
       FRAUD_SERVICE_TOKEN: ${FRAUD_SERVICE_TOKEN}
-      FRAUD_TLS_CERT: /certs/fraud-server.crt
-      FRAUD_TLS_KEY: /certs/fraud-server.key
-      FRAUD_TLS_CLIENT_CA: /certs/ca.crt
+      FRAUD_TLS_CERT: /certs/fraud/fraud-server.crt
+      FRAUD_TLS_KEY: /certs/fraud/fraud-server.key
+      FRAUD_TLS_CLIENT_CA: /certs/fraud/ca.crt
     volumes:
       - certs:/certs:ro
     healthcheck:

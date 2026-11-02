@@ -2,6 +2,7 @@ package io.ledgerforge.oauth;
 
 import io.ledgerforge.audit.AuditService;
 import io.ledgerforge.security.TenantPrincipal;
+import io.ledgerforge.security.ratelimit.RateLimiter;
 import io.ledgerforge.tenant.TenantService;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
@@ -53,9 +54,13 @@ public class TokenService {
     private final OAuthProperties props;
     private final String keyId;
     private final AuditService audit;
+    private final RateLimiter limiter;
+
+    static final int TOKENS_PER_MINUTE = 10;
 
     public TokenService(TenantService tenants, JwtEncoder encoder, OAuthProperties props,
-                        com.nimbusds.jose.jwk.RSAKey tokenSigningKey, AuditService audit) {
+                        com.nimbusds.jose.jwk.RSAKey tokenSigningKey, AuditService audit, RateLimiter limiter) {
+        this.limiter = limiter;
         this.tenants = tenants;
         this.encoder = encoder;
         this.props = props;
@@ -75,6 +80,13 @@ public class TokenService {
         TenantPrincipal client = tenants.authenticate(clientSecret)
                 .filter(p -> p.keyId().toString().equalsIgnoreCase(clientId.trim()))
                 .orElseThrow(() -> new OAuthError(HttpStatus.UNAUTHORIZED, "invalid_client", "Client authentication failed"));
+
+        // Per client, after authentication (so nobody can spend another client's budget with wrong secrets).
+        // Each token writes an audit event that briefly locks the tenant, so this also protects its transfers.
+        if (!limiter.tryAcquire("token:" + client.keyId(), TOKENS_PER_MINUTE, TOKENS_PER_MINUTE / 60.0).allowed()) {
+            throw new OAuthError(HttpStatus.TOO_MANY_REQUESTS, "slow_down",
+                    "Too many token requests. Reuse the current token until it is close to expiry.");
+        }
 
         List<String> scopes = grantedScopes(requestedScope);
         Instant now = Instant.now();
