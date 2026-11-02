@@ -47,6 +47,12 @@ ledgerforge:
       fail-open: ${FRAUD_FAIL_OPEN:true}   # sandbox default; set false to refuse transfers when scoring is down
       connect-timeout: 500ms
       read-timeout: 1500ms
+  assistant:
+    enabled: ${ASSISTANT_ENABLED:false}
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: ${ASSISTANT_MODEL:claude-haiku-5-5}
+    max-tool-rounds: 5
+    requests-per-minute: 10
 
 logging:
   pattern:
