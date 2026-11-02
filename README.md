@@ -32,6 +32,8 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | Plugins | `TransferPlugin` beans hook into every transfer without touching the core (examples: per-transfer limit, fraud check) |
 | AI ledger assistant | `POST /v1/assistant/ask` answers plain-English questions about your own ledger with Claude, through read-only tools scoped to your tenant ([ADR 0006](docs/adr/0006-ai-assistant-read-only-tools.md)) |
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
+| Authentication | API keys, or OAuth 2.0 client credentials: 15-minute RS256 access tokens with scopes (`ledger:read`, `ledger:write`, `assistant`) and a public JWKS ([ADR 0008](docs/adr/0008-oauth2-tokens-and-mtls.md)) |
+| Service-to-service security | Mutual TLS between the ledger and the fraud service: each side proves its identity with a certificate from a private CA, plus a service token |
 | API security | Hashed API keys, constant-time checks, rate limits shared across instances in Redis, strict headers, RFC 9457 errors with request ids |
 | Observability | Prometheus metrics (transfers, fraud decisions, assistant tokens, rate limiting, HTTP, DB pool, JVM) behind a read-only metrics token; OpenTelemetry traces of API requests and fraud-service calls ([guide](docs/OBSERVABILITY.md)) |
 
@@ -48,6 +50,26 @@ flowchart TB
     A --> DB
 ```
 
+## Authentication: API keys and OAuth 2.0
+
+API keys work directly (`Authorization: Bearer lf_test_...`). For less exposure, exchange the key for a **15-minute access token** and send that instead:
+
+```bash
+curl -s -X POST localhost:8080/oauth/token -u "$KEY_ID:$KEY" \
+  -d grant_type=client_credentials -d scope="ledger:read"
+# {"access_token":"eyJ...","token_type":"Bearer","expires_in":900,"scope":"ledger:read"}
+
+curl -s localhost:8080/v1/accounts -H "Authorization: Bearer eyJ..."
+```
+
+| Scope | Allows |
+|---|---|
+| `ledger:read` | `GET` on accounts, statements, transfers, integrity |
+| `ledger:write` | Opening accounts and making transfers |
+| `assistant` | The AI ledger assistant |
+
+A token carries only the scopes asked for, so a reporting tool can hold read-only access. Tokens are RS256-signed; other services can verify them with the public key at `GET /oauth/jwks.json`. Revoking the API key stops new tokens immediately, and existing ones expire within 15 minutes.
+
 ## AI fraud detection (Phase 2)
 
 Before a customer transfer moves money, and before any lock is taken, the `fraud-check` plugin computes behaviour features from the ledger itself (amount vs. the account's usual, transfers in the last hour, first payment to this recipient, share of balance used, account age, time of day) and asks the [fraud service](fraud-service/) for a decision.
@@ -62,7 +84,7 @@ Example reasons recorded for a blocked transfer: *"Transfer uses 97% of the avai
 
 Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
 
-Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs the ledger, fraud service, PostgreSQL and Redis together. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
+Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs the ledger, fraud service, PostgreSQL and Redis together, with **mutual TLS** between the ledger and the fraud service: a one-shot `certs` service creates a private CA, the fraud service accepts only the ledger's client certificate, and the ledger accepts only the fraud service's server certificate. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
 
 ## AI ledger assistant (Phase 2)
 
@@ -171,6 +193,8 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | GET | `/v1/transfers/{id}` | Get a transfer |
 | GET | `/v1/ledger/integrity` | Balance and audit-chain proof |
 | GET | `/v1/plugins` | Active plugins |
+| POST | `/oauth/token` | OAuth 2.0 client credentials: API key in, 15-minute access token out |
+| GET | `/oauth/jwks.json` | Public key for verifying access tokens |
 
 ## Tests that prove the guarantees
 
@@ -185,6 +209,8 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
 | PostgreSQL suite (`Postgres*Test`, `AppendOnlyHistoryTest`, `PostgresQueriesTest`) | Concurrency, idempotency, tenant isolation and transfer tests re-run on real PostgreSQL 16 via Testcontainers; the database itself refuses to update or delete postings, transfers and audit events; the fraud and assistant queries return correct figures; a blocked transfer's audit evidence survives the rollback. CI fails if these are skipped |
 | `RedisRateLimiterTest`, `RedisRateLimitApiTest` | Against real Redis: burst then 429 with `Retry-After`; two instances share one limit; buckets refill and expire; with Redis down, fails open or closed as asked and a circuit breaker stops further calls |
+| `OAuthTokenTest` | Client-credentials tokens: claims, 15-minute expiry, scopes (read-only can't write), tenant isolation, RFC 6749 errors, revoked keys get no tokens; tampered, expired, wrong-audience and foreign-key tokens are rejected; JWKS has no private parts |
+| `FraudMtls*Test`, `fraud-service/tests/test_mtls.py` | Mutual TLS: the trusted pair works; the ledger refuses an impostor server; the fraud service refuses an untrusted client certificate or none at all |
 | `ObservabilityTest` | Metrics need the read-only metrics token (tenant keys and the admin token are refused); business, HTTP, DB-pool and JVM metrics are exported |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |
@@ -204,6 +230,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 5. [Fraud scoring as a synchronous plugin](docs/adr/0005-fraud-scoring-plugin.md)
 6. [AI assistant through read-only, tenant-scoped tools](docs/adr/0006-ai-assistant-read-only-tools.md)
 7. [Rate limits shared across instances in Redis](docs/adr/0007-shared-rate-limiting-in-redis.md)
+8. [Short-lived OAuth 2.0 tokens and mutual TLS](docs/adr/0008-oauth2-tokens-and-mtls.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -213,13 +240,13 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
-| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry (done); OAuth2 + mTLS, load tests, Kubernetes | In progress |
+| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS (done); load tests, Kubernetes, Terraform | In progress |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
 ## Tech stack
 
-**Ledger:** Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 and Testcontainers PostgreSQL (tests) · springdoc OpenAPI · JUnit 5
+**Ledger:** Java 21 · Spring Boot 3.5 · Spring Security (OAuth 2.0 resource server, JWT) · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 and Testcontainers PostgreSQL (tests) · springdoc OpenAPI · JUnit 5
 
 **AI:** Claude API (tool use) for the ledger assistant
 

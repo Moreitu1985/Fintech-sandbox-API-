@@ -27,4 +27,5 @@ RUN rm -rf /usr/local/lib/python3.13/site-packages/pip /usr/local/lib/python3.13
 USER app
 EXPOSE 8090
 ENV FRAUD_MODEL_DIR=/app/model
-CMD ["uvicorn", "fraud_service.api:app", "--host", "0.0.0.0", "--port", "8090", "--no-server-header"]
+# Mutual TLS turns on when FRAUD_TLS_CERT, FRAUD_TLS_KEY and FRAUD_TLS_CLIENT_CA are set (see serve.py).
+CMD ["python", "-m", "fraud_service.serve"]

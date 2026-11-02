@@ -17,6 +17,10 @@ uvicorn fraud_service.api:app --port 8090
 
 Interactive docs: set `FRAUD_SERVICE_DOCS=true`, then open <http://localhost:8090/docs> (off by default).
 
+## Mutual TLS
+
+Set `FRAUD_TLS_CERT`, `FRAUD_TLS_KEY` and `FRAUD_TLS_CLIENT_CA` and start with `python -m fraud_service.serve`: the service then serves HTTPS and only accepts clients whose certificate is signed by `FRAUD_TLS_CLIENT_CA`. Setting a certificate without a client CA is refused, so TLS here always means mutual TLS. Development certificates: `scripts/generate-dev-certs.sh` at the repository root.
+
 ## API
 
 `POST /v1/score` (header `X-Service-Token`)

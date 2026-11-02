@@ -1,5 +1,6 @@
 package io.ledgerforge.security;
 
+import io.ledgerforge.oauth.Scopes;
 import io.ledgerforge.tenant.TenantService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -21,6 +22,12 @@ import java.util.List;
 public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     private static final String BEARER = "Bearer ";
+    /** An API key used directly carries every scope (OAuth tokens can carry fewer). */
+    private static final List<SimpleGrantedAuthority> AUTHORITIES = List.of(
+            new SimpleGrantedAuthority("ROLE_TENANT"),
+            new SimpleGrantedAuthority(Scopes.authority(Scopes.LEDGER_READ)),
+            new SimpleGrantedAuthority(Scopes.authority(Scopes.LEDGER_WRITE)),
+            new SimpleGrantedAuthority(Scopes.authority(Scopes.ASSISTANT)));
 
     private final TenantService tenants;
 
@@ -35,7 +42,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(BEARER)) {
             tenants.authenticate(header.substring(BEARER.length()).trim()).ifPresent(principal -> {
                 var auth = UsernamePasswordAuthenticationToken.authenticated(principal, null,
-                        List.of(new SimpleGrantedAuthority("ROLE_TENANT")));
+                        AUTHORITIES);
                 SecurityContext context = SecurityContextHolder.createEmptyContext();
                 context.setAuthentication(auth);
                 SecurityContextHolder.setContext(context);

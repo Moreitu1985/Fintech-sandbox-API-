@@ -3,6 +3,15 @@ package io.ledgerforge.fraud;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsExchange;
+import com.sun.net.httpserver.HttpsParameters;
+import com.sun.net.httpserver.HttpsServer;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import java.security.cert.X509Certificate;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -25,9 +34,39 @@ final class FakeFraudService implements AutoCloseable {
     /** When non-zero, answer every request with this HTTP status (e.g. 401 to simulate a token mismatch). */
     volatile int forcedStatus;
 
+    final List<String> clientCertificateSubjects = new CopyOnWriteArrayList<>();
+    private final boolean tls;
+
     FakeFraudService() throws IOException {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        this(null);
+    }
+
+    /** With an SSLContext: HTTPS that REQUIRES a client certificate trusted by that context (mutual TLS). */
+    FakeFraudService(SSLContext sslContext) throws IOException {
+        this.tls = sslContext != null;
+        if (sslContext == null) {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        } else {
+            HttpsServer https = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            https.setHttpsConfigurator(new HttpsConfigurator(sslContext) {
+                @Override
+                public void configure(HttpsParameters params) {
+                    SSLParameters ssl = sslContext.getDefaultSSLParameters();
+                    ssl.setNeedClientAuth(true);
+                    params.setSSLParameters(ssl);
+                }
+            });
+            server = https;
+        }
         server.createContext("/v1/score", exchange -> {
+            if (exchange instanceof HttpsExchange secure) {
+                try {
+                    var peer = (X509Certificate) secure.getSSLSession().getPeerCertificates()[0];
+                    clientCertificateSubjects.add(peer.getSubjectX500Principal().getName());
+                } catch (SSLPeerUnverifiedException e) {
+                    clientCertificateSubjects.add("none");
+                }
+            }
             byte[] body = exchange.getRequestBody().readAllBytes();
             String reply;
             int status;
@@ -62,7 +101,7 @@ final class FakeFraudService implements AutoCloseable {
     }
 
     String url() {
-        return "http://127.0.0.1:" + server.getAddress().getPort();
+        return (tls ? "https" : "http") + "://127.0.0.1:" + server.getAddress().getPort();
     }
 
     JsonNode lastFeatures() {

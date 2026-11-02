@@ -11,6 +11,7 @@ import io.ledgerforge.plugin.TransferPlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -51,7 +52,8 @@ public class FraudCheckPlugin implements TransferPlugin {
     private final LedgerMetrics metrics;
 
     public FraudCheckPlugin(FraudProperties props, FraudFeatureCalculator features, AccountRepository accounts,
-                            AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder) {
+                            AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder,
+                            SslBundles sslBundles) {
         if (props.url() == null || props.url().isBlank()) {
             throw new IllegalStateException("ledgerforge.plugins.fraud.url is required when the fraud plugin is enabled");
         }
@@ -60,7 +62,7 @@ public class FraudCheckPlugin implements TransferPlugin {
                     + FraudProperties.MIN_TOKEN_LENGTH + " characters");
         }
         this.props = props;
-        this.client = new FraudClient(props, restClientBuilder);
+        this.client = new FraudClient(props, restClientBuilder, sslBundles);
         this.metrics = metrics;
         this.features = features;
         this.accounts = accounts;
