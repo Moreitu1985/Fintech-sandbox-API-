@@ -16,7 +16,7 @@ metadata:
   annotations:
     reloader.stakater.com/auto: "true"
 spec:
-  replicas: 2
+  # No replicas field: the HorizontalPodAutoscaler owns the count, and `kubectl apply` won't reset it.
   revisionHistoryLimit: 5
   selector:
     matchLabels:

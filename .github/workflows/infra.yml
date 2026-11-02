@@ -47,7 +47,7 @@ jobs:
           mkdir -p rendered
           kustomize build deploy/k8s/base > rendered/base.yaml
           kustomize build deploy/k8s/overlays/aws > rendered/aws.yaml
-          if grep -nE '(SECRETS_READER_ROLE_ARN|AWS_REGION|VPC_CIDR|ACM_CERTIFICATE_ARN|API_HOSTNAME|PREFIX/)' rendered/aws.yaml; then
+          if grep -nE '(SECRETS_READER_ROLE_ARN|AWS_REGION|LB_SUBNETS_CIDR|DATA_SUBNETS_CIDR|ACM_CERTIFICATE_ARN|API_HOSTNAME|PREFIX/)' rendered/aws.yaml; then
             echo "::error::A placeholder was not replaced in the AWS overlay"; exit 1
           fi
           if grep -n 'name: aws-params' rendered/aws.yaml; then

@@ -82,13 +82,21 @@ variable "deletion_protection" {
 variable "api_hostname" {
   description = "Public host name of the API (for the ingress and the generated kustomize parameters)."
   type        = string
-  default     = "api.example.com"
+
+  validation {
+    condition     = can(regex("^([a-z0-9-]+\\.)+[a-z]{2,}$", var.api_hostname))
+    error_message = "Give a host name such as api.example.com."
+  }
 }
 
 variable "acm_certificate_arn" {
   description = "ACM certificate for api_hostname, used by the load balancer."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = can(regex("^arn:aws:acm:", var.acm_certificate_arn))
+    error_message = "Give the ARN of an ACM certificate in the deployment region."
+  }
 }
 
 variable "image_tag" {

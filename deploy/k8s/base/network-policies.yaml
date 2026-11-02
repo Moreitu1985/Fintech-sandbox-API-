@@ -77,12 +77,17 @@ spec:
       ports:
         - protocol: TCP
           port: 8090
-    # HTTPS out for the Claude API (AI assistant) and an OTLP trace collector.
+    # HTTPS out to the internet for the Claude API (AI assistant). Private ranges are excluded, so this
+    # can't reach the cluster's API server or other internal services, nor instance metadata.
+    # (An in-cluster OTLP trace collector on 4317/4318 needs its own rule when tracing is turned on.)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
-              - 169.254.169.254/32   # never the cloud instance-metadata service
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16       # link-local, including the instance-metadata service
       ports:
         - protocol: TCP
           port: 443

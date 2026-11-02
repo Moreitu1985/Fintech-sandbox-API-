@@ -7,13 +7,13 @@ data "aws_availability_zones" "available" {
   }
 }
 
-data "aws_caller_identity" "current" {}
-
 locals {
   name           = "ledgerforge-${var.environment}"
   secrets_prefix = "ledgerforge/${var.environment}"
   azs            = slice(data.aws_availability_zones.available.names, 0, 3)
   k8s_namespace  = "ledgerforge"
+  public_range   = cidrsubnet(var.vpc_cidr, 4, 0)  # load balancers and NAT only
+  data_range     = cidrsubnet(var.vpc_cidr, 4, 15) # RDS and ElastiCache only
 
   tags = {
     Project     = "ledgerforge"

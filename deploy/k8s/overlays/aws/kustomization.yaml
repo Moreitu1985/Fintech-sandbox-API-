@@ -25,6 +25,14 @@ configMapGenerator:
         config.kubernetes.io/local-config: "true"
 
 patches:
+  # The ALB controller holds back a rolling update until each new pod is healthy in the load balancer.
+  - target:
+      kind: Namespace
+      name: ledgerforge
+    patch: |-
+      - op: add
+        path: /metadata/labels/elbv2.k8s.aws~1pod-readiness-gate-inject
+        value: enabled
   # Trust store for RDS's certificate authority, so the JDBC driver verifies the database's identity
   # (sslmode=verify-full). Create it once: see deploy/README.md.
   - target:
@@ -74,12 +82,14 @@ replacements:
       - select: { kind: ExternalSecret }
         fieldPaths: ["spec.data.*.remoteRef.key"]
         options: { delimiter: "/", index: 0 }
-  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.VPC_CIDR }
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.LB_SUBNETS_CIDR }
     targets:
       - select: { kind: NetworkPolicy, name: ledger-api-aws }
-        fieldPaths:
-          - "spec.ingress.0.from.0.ipBlock.cidr"
-          - "spec.egress.0.to.0.ipBlock.cidr"
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.DATA_SUBNETS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: ledger-api-aws }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
   - source: { kind: ConfigMap, name: aws-params, fieldPath: data.ACM_CERTIFICATE_ARN }
     targets:
       - select: { kind: Ingress, name: ledger-api }

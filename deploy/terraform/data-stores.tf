@@ -119,6 +119,8 @@ resource "aws_elasticache_replication_group" "redis" {
   kms_key_id                 = aws_kms_key.data.arn
   transit_encryption_enabled = true
   auth_token                 = random_password.redis.result
+  # A new token is added next to the old one, so pods still holding the old token keep working.
+  auth_token_update_strategy = "ROTATE"
 
   snapshot_retention_limit   = 1
   auto_minor_version_upgrade = true

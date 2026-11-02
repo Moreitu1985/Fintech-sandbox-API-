@@ -8,10 +8,12 @@ module "vpc" {
   cidr = var.vpc_cidr
   azs  = local.azs
 
-  public_subnets      = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 8, i)]
+  # Address plan (/16 VPC): public subnets inside the first /20, data subnets inside the last /20, so
+  # Kubernetes NetworkPolicies can name "the load balancers" and "the data stores" as one range each.
+  public_subnets      = [for i, _ in local.azs : cidrsubnet(local.public_range, 4, i)]
   private_subnets     = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 4, i + 1)]
-  database_subnets    = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 8, i + 100)]
-  elasticache_subnets = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 8, i + 110)]
+  database_subnets    = [for i, _ in local.azs : cidrsubnet(local.data_range, 4, i)]
+  elasticache_subnets = [for i, _ in local.azs : cidrsubnet(local.data_range, 4, i + 8)]
 
   create_database_subnet_group           = true
   create_database_subnet_route_table     = true

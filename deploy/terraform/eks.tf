@@ -53,50 +53,15 @@ module "eks" {
         xvda = {
           device_name = "/dev/xvda"
           ebs = {
-            volume_size           = 50
-            volume_type           = "gp3"
+            volume_size = 50
+            volume_type = "gp3"
+            # Encrypted with the AWS-managed EBS key: node disks hold only images and scratch space,
+            # never ledger data, and this avoids granting Auto Scaling use of the data key.
             encrypted             = true
-            kms_key_id            = aws_kms_key.data.arn
             delete_on_termination = true
           }
         }
       }
     }
   }
-}
-
-# EBS-encrypted node volumes use the data key, so the Auto Scaling service may use it.
-resource "aws_kms_key_policy" "data" {
-  key_id = aws_kms_key.data.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AccountAdministration"
-        Effect    = "Allow"
-        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
-        Action    = "kms:*"
-        Resource  = "*"
-      },
-      {
-        Sid    = "AutoScalingUseForEncryptedVolumes"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
-        }
-        Action   = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]
-        Resource = "*"
-      },
-      {
-        Sid    = "AutoScalingCreateGrant"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
-        }
-        Action    = "kms:CreateGrant"
-        Resource  = "*"
-        Condition = { Bool = { "kms:GrantIsForAWSResource" = "true" } }
-      },
-    ]
-  })
 }

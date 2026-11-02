@@ -18,7 +18,7 @@ metadata:
     # With Stakater Reloader installed, rotated secrets and certificates trigger a rolling restart.
     reloader.stakater.com/auto: "true"
 spec:
-  replicas: 3
+  # No replicas field: the HorizontalPodAutoscaler owns the count, and `kubectl apply` won't reset it.
   revisionHistoryLimit: 5
   selector:
     matchLabels:
@@ -79,10 +79,11 @@ spec:
           resources:
             requests:
               cpu: 500m
-              memory: 768Mi
+              memory: 1Gi
             limits:
               cpu: "2"
-              memory: 1Gi
+              # The image gives the heap 75% of this; the rest covers metaspace, threads and buffers.
+              memory: 1536Mi
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
