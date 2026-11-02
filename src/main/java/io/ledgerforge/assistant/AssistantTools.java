@@ -13,10 +13,13 @@ import io.ledgerforge.ledger.LedgerTransaction;
 import io.ledgerforge.ledger.LedgerTransactionRepository;
 import io.ledgerforge.ledger.Posting;
 import io.ledgerforge.ledger.PostingRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -24,6 +27,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -43,7 +47,9 @@ public class AssistantTools {
     public record ToolResult(String content, boolean isError) {
     }
 
+    private static final Logger log = LoggerFactory.getLogger(AssistantTools.class);
     private static final int MAX_RESULT_CHARS = 20_000;
+    private static final int MAX_SUMMARY_ROWS = 200;
 
     /** Tool definitions sent to Claude (name, description, JSON schema for input). */
     static final String DEFINITIONS = """
@@ -80,41 +86,55 @@ public class AssistantTools {
     private final AuditEventRepository auditEvents;
     private final IntegrityService integrity;
     private final ObjectMapper json;
+    private final TransactionTemplate readOnly;
 
     public AssistantTools(AccountRepository accounts, PostingRepository postings,
                           LedgerTransactionRepository transactions, AuditEventRepository auditEvents,
-                          IntegrityService integrity, ObjectMapper json) {
+                          IntegrityService integrity, ObjectMapper json, PlatformTransactionManager txManager) {
         this.accounts = accounts;
         this.postings = postings;
         this.transactions = transactions;
         this.auditEvents = auditEvents;
         this.integrity = integrity;
         this.json = json;
+        this.readOnly = new TransactionTemplate(txManager);
+        this.readOnly.setReadOnly(true);
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * Runs one tool. Never throws: every failure becomes an error result the model can recover from.
+     * The query runs in its own read-only transaction (TransactionTemplate), so even a failure that
+     * marks the transaction rollback-only is caught here rather than escaping on commit.
+     */
     public ToolResult execute(UUID tenantId, String name, JsonNode input) {
-        JsonNode args = input == null || input.isNull() ? json.createObjectNode() : input;
+        JsonNode args = input == null || !input.isObject() ? json.createObjectNode() : input;
         try {
-            JsonNode result = switch (name) {
-                case "list_accounts" -> listAccounts(tenantId);
-                case "account_statement" -> statement(tenantId, args);
-                case "transfer_summary" -> transferSummary(tenantId, intArg(args, "days", 30, 1, 365));
-                case "fraud_events" -> fraudEvents(tenantId, intArg(args, "days", 7, 1, 90),
-                        args.path("decision").asText("ANY"));
-                case "ledger_integrity" -> json.valueToTree(integrity.check(tenantId));
-                default -> throw new ToolInputException("Unknown tool: " + name);
-            };
+            JsonNode result = readOnly.execute(status -> run(tenantId, name, args));
             String text = json.writeValueAsString(result);
             if (text.length() > MAX_RESULT_CHARS) {
-                text = text.substring(0, MAX_RESULT_CHARS) + "... [truncated]";
+                text = json.writeValueAsString(json.createObjectNode()
+                        .put("truncated", true)
+                        .put("note", "The result was too large to return. Ask for a narrower period or one account."));
             }
             return new ToolResult(text, false);
         } catch (ToolInputException e) {
             return new ToolResult(e.getMessage(), true);
         } catch (Exception e) {
+            log.warn("Assistant tool {} failed: {}", name, e.toString());
             return new ToolResult("The tool failed. Try a different question.", true);
         }
+    }
+
+    private JsonNode run(UUID tenantId, String name, JsonNode args) {
+        return switch (name) {
+            case "list_accounts" -> listAccounts(tenantId);
+            case "account_statement" -> statement(tenantId, args);
+            case "transfer_summary" -> transferSummary(tenantId, intArg(args, "days", 30, 1, 365));
+            case "fraud_events" -> fraudEvents(tenantId, intArg(args, "days", 7, 1, 90),
+                    args.path("decision").asText("ANY"));
+            case "ledger_integrity" -> json.valueToTree(integrity.check(tenantId));
+            default -> throw new ToolInputException("Unknown tool: " + name);
+        };
     }
 
     private JsonNode listAccounts(UUID tenantId) {
@@ -182,7 +202,8 @@ public class AssistantTools {
         accounts.findByTenantId(tenantId, PageRequest.of(0, 1000)).forEach(a -> byId.put(a.getId(), a));
 
         ArrayNode list = json.createArrayNode();
-        for (Object[] row : postings.summarizeByAccount(tenantId, since)) {
+        List<Object[]> rows = postings.summarizeByAccount(tenantId, since);
+        for (Object[] row : rows.subList(0, Math.min(rows.size(), MAX_SUMMARY_ROWS))) {
             UUID accountId = (UUID) row[0];
             Account a = byId.get(accountId);
             ObjectNode item = list.addObject()
@@ -195,12 +216,16 @@ public class AssistantTools {
             }
         }
         ObjectNode out = json.createObjectNode().put("days", days).put("since", since.toString());
+        if (rows.size() > MAX_SUMMARY_ROWS) {
+            out.put("note", "Only " + MAX_SUMMARY_ROWS + " of " + rows.size() + " accounts are listed.");
+        }
         out.set("accounts", list);
         return out;
     }
 
     private JsonNode fraudEvents(UUID tenantId, int days, String decision) {
-        List<String> types = switch (decision.toUpperCase()) {
+        String wanted = decision.toUpperCase(Locale.ROOT);
+        List<String> types = switch (wanted) {
             case "REVIEW" -> List.of("FRAUD_REVIEW");
             case "BLOCK" -> List.of("FRAUD_BLOCK");
             case "ANY" -> List.of("FRAUD_REVIEW", "FRAUD_BLOCK");
@@ -227,7 +252,7 @@ public class AssistantTools {
                 item.put("amount", "unknown");
             }
         }
-        ObjectNode out = json.createObjectNode().put("days", days).put("decision", decision.toUpperCase())
+        ObjectNode out = json.createObjectNode().put("days", days).put("decision", wanted)
                 .put("count", list.size());
         out.set("events", list);
         return out;

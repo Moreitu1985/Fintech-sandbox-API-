@@ -21,4 +21,14 @@ class AssistantToolsUnitTest {
         assertThat(f).containsEntry("from", "a").containsEntry("amount", "950000").containsEntry("model", "m1")
                 .containsEntry("reasons", "Large; late; new recipient");
     }
+
+    @Test
+    void answersAreReducedToPlainTextWithoutLinks() {
+        assertThat(AssistantService.plainText("See [the report](http://x.example/a) now"))
+                .isEqualTo("See the report now");
+        assertThat(AssistantService.plainText("![img](https://x.example/p?d=1)")).isEqualTo("img");
+        assertThat(AssistantService.plainText("go to www.x.example or ftp://y.example/z"))
+                .isEqualTo("go to [link removed] or [link removed]");
+        assertThat(AssistantService.plainText("Balance is 25.50 ZAR")).isEqualTo("Balance is 25.50 ZAR");
+    }
 }

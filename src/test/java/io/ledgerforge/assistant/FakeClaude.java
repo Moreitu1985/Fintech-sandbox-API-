@@ -53,8 +53,14 @@ final class FakeClaude implements AutoCloseable {
                     status = 200;
                     reply = repeatForever;
                 } else if (!script.isEmpty()) {
-                    status = 200;
-                    reply = script.pollFirst();
+                    String next = script.pollFirst();
+                    if (next.startsWith("STATUS:")) {          // scripted failure, e.g. "STATUS:529"
+                        status = Integer.parseInt(next.substring(7));
+                        reply = "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"scripted\"}}";
+                    } else {
+                        status = 200;
+                        reply = next;
+                    }
                 } else {
                     status = 200;
                     reply = text("(script exhausted)");
@@ -97,9 +103,25 @@ final class FakeClaude implements AutoCloseable {
     }
 
     static String text(String answer) {
+        return stop("end_turn", answer);
+    }
+
+    static String stop(String stopReason, String answer) {
         return "{\"id\":\"msg_final\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-5-5\","
                 + "\"content\":[{\"type\":\"text\",\"text\":" + quote(answer) + "}],"
-                + "\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":10}}";
+                + "\"stop_reason\":\"" + stopReason + "\",\"usage\":{\"input_tokens\":10,\"output_tokens\":10}}";
+    }
+
+    /** One response asking for {@code count} parallel calls of the same tool. */
+    static String parallelToolUses(String name, int count) {
+        StringBuilder blocks = new StringBuilder();
+        for (int i = 1; i <= count; i++) {
+            blocks.append(i > 1 ? "," : "").append("{\"type\":\"tool_use\",\"id\":\"toolu_p").append(i)
+                    .append("\",\"name\":\"").append(name).append("\",\"input\":{}}");
+        }
+        return "{\"id\":\"msg_par\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-haiku-5-5\","
+                + "\"content\":[" + blocks + "],\"stop_reason\":\"tool_use\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":10}}";
     }
 
     /** The tool_result blocks the ledger sent in request number {@code index} (0-based). */

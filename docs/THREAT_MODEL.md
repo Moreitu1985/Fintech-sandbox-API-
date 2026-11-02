@@ -38,8 +38,8 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Shared 32+ char service token, constant-time check; service only on the internal Docker network | Implemented (mTLS in Phase 3) |
 | Denial of service | Fraud service slow or down stalls payments | 500 ms / 1.5 s timeouts; explicit fail-open or fail-closed policy | Implemented |
 | Information disclosure | AI assistant reveals another tenant's data | Tools take the tenant from the API key, never from the model; foreign ids look missing; no free-form SQL | Implemented (Phase 2) |
-| Tampering / Elevation | Prompt injection in account names, descriptions or fraud reasons steers the assistant | Only read-only tools exist; results are marked as untrusted data; output goes only to the same caller | Implemented |
-| Denial of service | AI assistant used to run up model costs | 10 questions/min per tenant, 5 tool rounds per question, capped output tokens, timeouts; off by default | Implemented |
+| Tampering / Elevation | Prompt injection in account names, descriptions or fraud reasons steers the assistant | Only read-only tools exist; results wrapped as untrusted data; links and images stripped from answers; output goes only to the same caller | Implemented |
+| Denial of service | AI assistant used to run up model costs | 10 questions/min per tenant, 8 in flight per server, 5 model calls and 4 tool calls per round, 60k characters of tool data, capped output, 60 s deadline; off by default | Implemented |
 | **E**levation of privilege | Tenant key used on admin endpoints | Separate roles; admin requires the admin token | Implemented |
 | Elevation of privilege | Unknown or forgotten endpoints exposed | Default-deny authorization rule; only health is public | Implemented |
 
