@@ -14,7 +14,9 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 
 - Internet → API (all requests are untrusted)
 - API → database (the application role is trusted but must not be able to rewrite history)
-- Platform admin → `/admin` endpoints
+- Platform admin → `/admin` endpoints (in the AWS deployment, reachable only inside the cluster)
+- Ledger API ↔ fraud service (mutual TLS with a dedicated CA)
+- Cluster ↔ AWS (secrets read by one IAM role, limited to this environment's secrets)
 
 ## STRIDE analysis
 
@@ -32,7 +34,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | **I**nformation disclosure | Tenant reads another tenant's account | Every query scoped by tenant from the authenticated key; foreign ids return 404 | Implemented |
 | Information disclosure | Stack traces or SQL in errors | Problem+json errors with generic messages; stack traces disabled | Implemented |
 | Information disclosure | Keys leaked from database backup | Only hashes are stored | Implemented |
-| Information disclosure | Traffic interception | HTTPS with HSTS at the edge | Partial (TLS termination in deployment) |
+| Information disclosure | Traffic interception | HTTPS with HSTS; in the AWS deployment, TLS 1.2+ at the load balancer, verified TLS to PostgreSQL, TLS to Redis, mutual TLS between services | Mitigated in the AWS deployment |
 | **D**enial of service | Request flood | Token-bucket limits per key and per IP, shared across instances in Redis (atomic Lua script, Redis clock); API limits fail open and the AI assistant's limit fails closed if Redis is down, behind a circuit breaker (ADR 0007) | Implemented |
 | Denial of service | Token endpoint used to flood the audit chain or hold the tenant lock | 10 tokens per minute per client, counted after authentication | Implemented |
 | Information disclosure | API key sent in a token-request URL lands in logs | Parameters in the URL are refused | Implemented |
@@ -67,7 +69,10 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - If Redis is down, API rate limits are not enforced (fail-open by design, visible in `ledgerforge_rate_limiter_errors_total`); the AI assistant refuses questions instead.
 - The audit chain proves tampering but cannot stop a full database administrator from rewriting it; external anchoring is planned.
 - No end-user (customer) authentication: tenants authenticate, and they are responsible for their own users.
-- Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned for Phase 3. Every other fixable CRITICAL/HIGH finding fails the build.
+- Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned before then. Every other fixable CRITICAL/HIGH finding fails the build.
 - The fraud model is trained on synthetic data and defaults to fail-open in the sandbox. Real deployments need retraining on real labelled data and a fail-closed or fallback policy.
 - The AI assistant sends the tenant's own ledger data to an external model provider. Production use needs a data-processing agreement and a POPIA review.
+- In the AWS deployment the API connects to PostgreSQL as the database owner; a separate least-privilege runtime role is planned. Database triggers still refuse updates and deletes of postings, transfers and audit events.
+- Worker nodes have unrestricted outbound HTTPS through NAT (pods are narrowed by NetworkPolicies); VPC endpoints and an egress firewall would narrow it further.
+- Terraform state holds the generated secrets, so the state bucket must be encrypted and tightly restricted.
 - Revoking an API key doesn't recall access tokens already issued from it; they expire within 15 minutes.
