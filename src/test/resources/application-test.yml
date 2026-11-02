@@ -9,6 +9,13 @@ ledgerforge:
   rate-limit:
     capacity: 1000000
     refill-per-second: 1000000
+  webhooks:
+    # Fixed, so every cached test context (they share one H2 database) can read every endpoint's secret.
+    encryption-key: dGVzdC1vbmx5LXdlYmhvb2sta2V5LTMyLWJ5dGVzISE=
+    allow-insecure-targets: true
+    poll-interval: 100ms
+    retry-delays: [200ms, 200ms]
+    disable-after-failed-deliveries: 2
   plugins:
     max-transfer:
       enabled: true

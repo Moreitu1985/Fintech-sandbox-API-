@@ -124,7 +124,7 @@ spec:
       volumes:
         # Keys are Spring property names: spring.datasource.username, spring.datasource.password,
         # spring.data.redis.password, ledgerforge.admin-token, ledgerforge.metrics-token,
-        # ledgerforge.plugins.fraud.token (and optionally ledgerforge.assistant.api-key).
+        # ledgerforge.plugins.fraud.token, ledgerforge.webhooks.encryption-key (and optionally ledgerforge.assistant.api-key).
         - name: secrets
           secret:
             secretName: ledger-api-secrets

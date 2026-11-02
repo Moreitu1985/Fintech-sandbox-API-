@@ -8,6 +8,8 @@ import io.ledgerforge.ledger.dto.LedgerDtos.TransferResponse;
 import io.ledgerforge.plugin.TransferContext;
 import io.ledgerforge.plugin.TransferPlugin;
 import io.ledgerforge.tenant.TenantRepository;
+import io.ledgerforge.webhook.WebhookEventTypes;
+import io.ledgerforge.webhook.WebhookPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,7 +26,7 @@ import java.util.regex.Pattern;
 
 /**
  * The money path. One database transaction covers: idempotency check, account locks, plugin checks,
- * balance check, both postings, the idempotency record and the audit event. All of it commits, or none of it.
+ * balance check, both postings, the idempotency record, the audit event and any webhook events. All of it commits, or none of it.
  */
 @Service
 public class TransferService {
@@ -39,11 +41,14 @@ public class TransferService {
     private final AuditService audit;
     private final List<TransferPlugin> plugins;
     private final TenantRepository tenants;
+    private final WebhookPublisher webhooks;
 
     public TransferService(AccountRepository accounts, LedgerTransactionRepository transactions,
                            PostingRepository postings, IdempotencyRecordRepository idempotency,
-                           AuditService audit, List<TransferPlugin> plugins, TenantRepository tenants) {
+                           AuditService audit, List<TransferPlugin> plugins, TenantRepository tenants,
+                           WebhookPublisher webhooks) {
         this.tenants = tenants;
+        this.webhooks = webhooks;
         this.accounts = accounts;
         this.transactions = transactions;
         this.postings = postings;
@@ -126,8 +131,12 @@ public class TransferService {
         audit.append(tenantId, "TRANSFER_POSTED", "transactionId=" + txn.getId() + ";from=" + from.getId()
                 + ";to=" + to.getId() + ";amount=" + amount + ";currency=" + request.currency());
 
+        TransferResponse response = TransferResponse.from(txn);
+        // Same transaction as the postings: the event exists if and only if the money moved.
+        webhooks.publish(tenantId, WebhookEventTypes.TRANSFER_POSTED, response);
+
         runAfterCommit(context.withTransactionId(txn.getId()));
-        return new Result(TransferResponse.from(txn), false);
+        return new Result(response, false);
     }
 
     @Transactional(readOnly = true)

@@ -3,7 +3,10 @@ package io.ledgerforge.ledger;
 import io.ledgerforge.audit.AuditService;
 import io.ledgerforge.common.error.ApiException;
 import io.ledgerforge.ledger.dto.LedgerDtos.CreateAccountRequest;
+import io.ledgerforge.ledger.dto.LedgerDtos.AccountResponse;
 import io.ledgerforge.tenant.TenantRepository;
+import io.ledgerforge.webhook.WebhookEventTypes;
+import io.ledgerforge.webhook.WebhookPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -21,10 +24,12 @@ public class AccountService {
     private final PostingRepository postings;
     private final AuditService audit;
     private final TenantRepository tenants;
+    private final WebhookPublisher webhooks;
 
     public AccountService(AccountRepository accounts, PostingRepository postings, AuditService audit,
-                          TenantRepository tenants) {
+                          TenantRepository tenants, WebhookPublisher webhooks) {
         this.tenants = tenants;
+        this.webhooks = webhooks;
         this.accounts = accounts;
         this.postings = postings;
         this.audit = audit;
@@ -37,6 +42,7 @@ public class AccountService {
         Account account = accounts.save(new Account(tenantId, request.name().strip(), request.currency(), allowNegative));
         audit.append(tenantId, "ACCOUNT_OPENED", "accountId=" + account.getId()
                 + ";currency=" + account.getCurrency() + ";allowNegative=" + allowNegative);
+        webhooks.publish(tenantId, WebhookEventTypes.ACCOUNT_CREATED, AccountResponse.from(account));
         return account;
     }
 

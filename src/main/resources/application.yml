@@ -77,6 +77,11 @@ ledgerforge:
       read-timeout: 1500ms
       # Name of a spring.ssl.bundle.pem.* bundle; turns on mutual TLS to the fraud service (needs an https url).
       ssl-bundle: ${FRAUD_SSL_BUNDLE:}
+  webhooks:
+    # Base64 AES-256 key that encrypts endpoint signing secrets at rest (`openssl rand -base64 32`).
+    encryption-key: ${LEDGERFORGE_WEBHOOKS_ENCRYPTION_KEY:}
+    # Never true in production: allows http, private addresses and any port (server-side request forgery).
+    allow-insecure-targets: false
   assistant:
     enabled: ${ASSISTANT_ENABLED:false}
     api-key: ${ANTHROPIC_API_KEY:}
@@ -97,6 +102,9 @@ spring:
     url: jdbc:h2:mem:ledgerforge;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
     username: sa
     password: ""
+ledgerforge:
+  webhooks:
+    allow-insecure-targets: true   # local development: deliver to http://localhost receivers
 
 ---
 # Public demo (e.g. Render free tier): in-memory database that resets on restart,
@@ -130,6 +138,8 @@ spring:
 ledgerforge:
   oauth:
     require-signing-key: true   # production never runs on a temporary token-signing key
+  webhooks:
+    require-encryption-key: true
 springdoc:
   api-docs:
     enabled: false

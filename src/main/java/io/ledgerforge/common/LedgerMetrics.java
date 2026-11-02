@@ -45,6 +45,15 @@ public class LedgerMetrics {
                 .tag("direction", "output").register(registry).increment(outputTokens);
     }
 
+    /** outcome: succeeded, retrying, failed (gave up) or cancelled. */
+    public void webhookDelivery(String outcome) {
+        Counter.builder("ledgerforge.webhook.deliveries")
+                .description("Webhook delivery attempts by outcome")
+                .tag("outcome", outcome)
+                .register(registry)
+                .increment();
+    }
+
     /** client: api_key or ip. */
     public void rateLimited(String client) {
         Counter.builder("ledgerforge.rate_limited")
