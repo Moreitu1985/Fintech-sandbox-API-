@@ -1,0 +1,56 @@
+{
+  "name": "@ledgerforge/sdk",
+  "version": "0.4.0",
+  "description": "TypeScript SDK for the LedgerForge ledger API: accounts, idempotent transfers, OAuth, webhooks with signature verification.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && tsc -p tsconfig.cjs.json && node scripts/mark-cjs.mjs",
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
+    "test:dist": "node scripts/check-dist.mjs",
+    "e2e": "node --experimental-strip-types test-e2e/e2e.ts"
+  },
+  "keywords": [
+    "ledger",
+    "fintech",
+    "payments",
+    "double-entry",
+    "webhooks",
+    "standard-webhooks",
+    "sdk"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Moreitu1985/Fintech-sandbox-API-.git",
+    "directory": "sdk/typescript"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}
