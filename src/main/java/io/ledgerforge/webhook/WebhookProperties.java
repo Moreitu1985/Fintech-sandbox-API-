@@ -19,6 +19,9 @@ import java.util.List;
  * @param disableAfterFailedDeliveries  turn an endpoint off after this many deliveries in a row give up
  * @param maxEndpointsPerTenant  registration limit
  * @param maxConcurrentDeliveries sends in flight per instance
+ * @param maxInFlightPerEndpoint  sends in flight to one endpoint, per instance (fairness: a slow receiver
+ *                                can't take every slot)
+ * @param maxInFlightPerTenant    sends in flight for one tenant, per instance
  */
 @ConfigurationProperties("ledgerforge.webhooks")
 public record WebhookProperties(
@@ -32,13 +35,16 @@ public record WebhookProperties(
         @DefaultValue("10s") Duration requestTimeout,
         @DefaultValue("5") int disableAfterFailedDeliveries,
         @DefaultValue("10") int maxEndpointsPerTenant,
-        @DefaultValue("16") int maxConcurrentDeliveries) {
+        @DefaultValue("16") int maxConcurrentDeliveries,
+        @DefaultValue("2") int maxInFlightPerEndpoint,
+        @DefaultValue("4") int maxInFlightPerTenant) {
 
     public WebhookProperties {
         if (retryDelays.stream().anyMatch(d -> d.isNegative() || d.isZero())) {
             throw new IllegalArgumentException("ledgerforge.webhooks.retry-delays must all be positive");
         }
-        if (maxConcurrentDeliveries < 1 || maxEndpointsPerTenant < 1 || disableAfterFailedDeliveries < 1) {
+        if (maxConcurrentDeliveries < 1 || maxEndpointsPerTenant < 1 || disableAfterFailedDeliveries < 1
+                || maxInFlightPerEndpoint < 1 || maxInFlightPerTenant < 1) {
             throw new IllegalArgumentException("ledgerforge.webhooks limits must be at least 1");
         }
     }

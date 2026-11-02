@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -49,6 +50,9 @@ public class WebhookEndpoint {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Version
+    private Long version;
+
     protected WebhookEndpoint() {
     }
 
@@ -62,7 +66,7 @@ public class WebhookEndpoint {
         this.secretCiphertext = secretCiphertext;
         this.enabled = true;
         this.failedDeliveriesInRow = 0;
-        this.createdAt = Instant.now();
+        this.createdAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     }
 
     boolean subscribesTo(String eventType) {
@@ -91,10 +95,6 @@ public class WebhookEndpoint {
     void delete() {
         this.enabled = false;
         this.deletedAt = Instant.now();
-    }
-
-    void deliverySucceeded() {
-        this.failedDeliveriesInRow = 0;
     }
 
     /** @return the new count of deliveries that exhausted their retries in a row */

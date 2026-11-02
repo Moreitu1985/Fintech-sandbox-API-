@@ -12,7 +12,8 @@ CREATE TABLE webhook_endpoints (
     failed_deliveries_in_row INTEGER NOT NULL,
     created_at               TIMESTAMP(6) WITH TIME ZONE NOT NULL,
     disabled_at              TIMESTAMP(6) WITH TIME ZONE,
-    deleted_at               TIMESTAMP(6) WITH TIME ZONE
+    deleted_at               TIMESTAMP(6) WITH TIME ZONE,
+    version                  BIGINT NOT NULL DEFAULT 0   -- optimistic locking: no stale copy can overwrite a change
 );
 CREATE INDEX idx_webhook_endpoints_tenant ON webhook_endpoints (tenant_id);
 
@@ -20,7 +21,7 @@ CREATE TABLE webhook_events (
     id          UUID PRIMARY KEY,
     tenant_id   UUID NOT NULL REFERENCES tenants (id),
     event_type  VARCHAR(40) NOT NULL,
-    payload     VARCHAR(8000) NOT NULL,   -- the exact JSON body that is signed and sent
+    payload     VARCHAR(100000) NOT NULL, -- the exact JSON body that is signed and sent
     created_at  TIMESTAMP(6) WITH TIME ZONE NOT NULL
 );
 
@@ -36,6 +37,8 @@ CREATE TABLE webhook_deliveries (
     last_status_code  INTEGER,
     last_error        VARCHAR(200),
     created_at        TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    version           BIGINT NOT NULL DEFAULT 0,   -- bumped by every claim and cancellation, so a sender whose
+                                                   -- lease was taken over can't record over the new holder
     CONSTRAINT uq_webhook_delivery UNIQUE (endpoint_id, event_id)
 );
 CREATE INDEX idx_webhook_deliveries_due ON webhook_deliveries (status, next_attempt_at);

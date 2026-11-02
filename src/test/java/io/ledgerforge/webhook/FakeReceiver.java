@@ -27,6 +27,7 @@ final class FakeReceiver implements AutoCloseable {
     final List<Received> requests = new CopyOnWriteArrayList<>();
     private final ConcurrentLinkedQueue<Integer> script = new ConcurrentLinkedQueue<>();
     private final AtomicInteger defaultStatus = new AtomicInteger(200);
+    private final AtomicInteger delayMillis = new AtomicInteger(0);
     private final HttpServer server;
 
     FakeReceiver() throws IOException {
@@ -36,10 +37,19 @@ final class FakeReceiver implements AutoCloseable {
                 requests.add(new Received(Map.copyOf(exchange.getRequestHeaders()),
                         new String(in.readAllBytes(), StandardCharsets.UTF_8)));
             }
+            int delay = delayMillis.get();
+            if (delay > 0) {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             Integer next = script.poll();
             exchange.sendResponseHeaders(next != null ? next : defaultStatus.get(), -1);
             exchange.close();
         });
+        server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
         server.start();
     }
 
@@ -50,6 +60,11 @@ final class FakeReceiver implements AutoCloseable {
     /** The next responses, in order; afterwards the default status. */
     void respondWith(Integer... statuses) {
         script.addAll(List.of(statuses));
+    }
+
+    /** Answer every request this much later (a slow receiver). */
+    void delay(Duration delay) {
+        delayMillis.set((int) delay.toMillis());
     }
 
     void respondAlways(int status) {

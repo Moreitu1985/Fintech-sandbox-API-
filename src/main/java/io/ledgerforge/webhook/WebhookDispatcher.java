@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -19,9 +20,13 @@ import java.net.http.HttpTimeoutException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -44,6 +49,8 @@ public class WebhookDispatcher implements SmartLifecycle {
     private final WebhookProperties properties;
     private final HttpClient http;
     private final Semaphore slots;
+    private final Map<UUID, Integer> perEndpoint = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> perTenant = new ConcurrentHashMap<>();
     private ScheduledExecutorService scheduler;
     private ExecutorService senders;
     private volatile boolean running;
@@ -82,7 +89,14 @@ public class WebhookDispatcher implements SmartLifecycle {
     public void stop() {
         running = false;
         if (scheduler != null) {
-            scheduler.shutdownNow();
+            scheduler.shutdown(); // let a poll in progress finish claiming and handing over its work
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
         if (senders != null) {
             senders.shutdown();
@@ -107,59 +121,100 @@ public class WebhookDispatcher implements SmartLifecycle {
         }
     }
 
-    /** One round: claim as many due deliveries as there are free send slots, and send them. */
+    /**
+     * One round. Slots are shared fairly: endpoints are visited longest-waiting first, and none may hold
+     * more than {@code max-in-flight-per-endpoint} sends (nor a tenant more than {@code -per-tenant}), so a
+     * slow or dead receiver can't take every slot and delay other tenants' webhooks.
+     */
     void poll() {
-        int free = slots.availablePermits();
-        if (!running || free == 0) {
+        if (!running || slots.availablePermits() == 0) {
             return;
         }
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        List<WebhookDeliveryRepository.Due> due = deliveries.findDue(now, PageRequest.of(0, free));
         Instant leaseUntil = now.plus(properties.lease());
-        for (WebhookDeliveryRepository.Due d : due) {
-            if (!slots.tryAcquire()) {
-                return;
-            }
-            boolean claimed;
-            try {
-                claimed = recorder.claim(d.getId(), d.getNextAttemptAt(), leaseUntil);
-            } catch (RuntimeException e) {
-                slots.release();
-                throw e;
-            }
-            if (!claimed) {
-                slots.release(); // another instance got it
+        List<WebhookDeliveryRepository.DueEndpoint> endpoints =
+                deliveries.findDueEndpoints(now, PageRequest.of(0, 200));
+        for (WebhookDeliveryRepository.DueEndpoint e : endpoints) {
+            int room = Math.min(properties.maxInFlightPerEndpoint() - inFlight(perEndpoint, e.getEndpointId()),
+                    properties.maxInFlightPerTenant() - inFlight(perTenant, e.getTenantId()));
+            room = Math.min(room, slots.availablePermits());
+            if (room <= 0) {
+                if (slots.availablePermits() == 0) {
+                    return;
+                }
                 continue;
             }
-            senders.submit(() -> {
-                try {
-                    deliver(d);
-                } finally {
-                    slots.release();
+            for (WebhookDeliveryRepository.Due d : deliveries.findDueFor(e.getEndpointId(), now, PageRequest.of(0, room))) {
+                if (!running || !slots.tryAcquire()) {
+                    return;
                 }
-            });
+                if (!recorder.claim(d.getId(), d.getNextAttemptAt(), leaseUntil)) {
+                    slots.release(); // another instance got it
+                    continue;
+                }
+                track(d, +1);
+                try {
+                    senders.submit(() -> {
+                        try {
+                            deliver(d, leaseUntil);
+                        } finally {
+                            track(d, -1);
+                            slots.release();
+                        }
+                    });
+                } catch (RejectedExecutionException shuttingDown) {
+                    track(d, -1);
+                    slots.release(); // the lease expires and another instance (or the next start) sends it
+                    return;
+                }
+            }
         }
     }
 
-    private void deliver(WebhookDeliveryRepository.Due due) {
+    private static int inFlight(Map<UUID, Integer> counts, UUID key) {
+        return counts.getOrDefault(key, 0);
+    }
+
+    /** Atomic per key: an entry is removed when it reaches zero, so the maps don't grow forever. */
+    private void track(WebhookDeliveryRepository.Due d, int delta) {
+        perEndpoint.compute(d.getEndpointId(), (k, v) -> adjust(v, delta));
+        perTenant.compute(d.getTenantId(), (k, v) -> adjust(v, delta));
+    }
+
+    private static Integer adjust(Integer current, int delta) {
+        int n = (current == null ? 0 : current) + delta;
+        return n <= 0 ? null : n;
+    }
+
+    private void deliver(WebhookDeliveryRepository.Due due, Instant leaseUntil) {
         WebhookDeliveryRecorder.Attempt attempt;
         try {
-            attempt = recorder.prepare(due.getId()).orElse(null);
+            attempt = recorder.prepare(due.getId(), leaseUntil).orElse(null);
         } catch (RuntimeException e) {
             log.error("Could not prepare webhook delivery {}", due.getId(), e);
-            safeRecord(due, null, "internal_error");
+            safeRecord(due, leaseUntil, null, "internal_error");
             return;
         }
         if (attempt == null) {
             return;
         }
-        Result result = send(attempt);
-        safeRecord(due, result.statusCode, result.error);
+        Result result;
+        try {
+            result = send(attempt);
+        } catch (RuntimeException e) {
+            // Counted as a failed attempt, so a delivery that always throws still runs out of retries.
+            log.error("Webhook delivery {} failed unexpectedly", due.getId(), e);
+            result = new Result(null, "internal_error");
+        }
+        safeRecord(due, leaseUntil, result.statusCode, result.error);
     }
 
-    private void safeRecord(WebhookDeliveryRepository.Due due, Integer statusCode, String error) {
+    private void safeRecord(WebhookDeliveryRepository.Due due, Instant leaseUntil, Integer statusCode, String error) {
         try {
-            recorder.record(due.getId(), statusCode, error);
+            recorder.record(due.getId(), leaseUntil, statusCode, error);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            // Cancelled or taken over by another instance between our check and commit: theirs stands.
+            log.debug("Webhook delivery {} changed while recording; result dropped", due.getId());
         } catch (RuntimeException e) {
             // The lease expires and the delivery is tried again: at-least-once, never lost.
             log.error("Could not record webhook delivery {}", due.getId(), e);

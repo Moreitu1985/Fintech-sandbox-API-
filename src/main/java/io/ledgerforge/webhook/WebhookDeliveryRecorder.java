@@ -12,13 +12,25 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** The dispatcher's database side: short transactions around (never during) the HTTP call. */
+/**
+ * The dispatcher's database side: short transactions around (never during) the HTTP call.
+ *
+ * <p>Every write is fenced by the lease: {@code leaseUntil} is the next-attempt time the claim set, and
+ * only the instance whose lease is still on the row may record. If a slow instance's lease ran out and
+ * another instance took the delivery over, the slow one's result is dropped. The row's version, bumped by
+ * every claim and cancellation, catches a takeover that happens between the check and the commit.
+ */
 @Component
 public class WebhookDeliveryRecorder {
 
     /** Everything needed to send one delivery, read in one transaction. */
     public record Attempt(UUID deliveryId, UUID tenantId, UUID eventId, String url, String secret, String body,
                           int attemptNumber) {
+        @Override
+        public String toString() {
+            // Never print the signing secret, whatever logs this later.
+            return "Attempt[deliveryId=" + deliveryId + ", eventId=" + eventId + ", attempt=" + attemptNumber + "]";
+        }
     }
 
     private final WebhookDeliveryRepository deliveries;
@@ -49,13 +61,13 @@ public class WebhookDeliveryRecorder {
     }
 
     /**
-     * Loads a claimed delivery. Empty if it no longer needs sending; a delivery whose endpoint has been
-     * disabled or deleted meanwhile is cancelled instead.
+     * Loads a claimed delivery. Empty if this caller no longer holds it, or it no longer needs sending; a
+     * delivery whose endpoint has been disabled or deleted meanwhile is cancelled instead.
      */
     @Transactional
-    public Optional<Attempt> prepare(UUID deliveryId) {
+    public Optional<Attempt> prepare(UUID deliveryId, Instant leaseUntil) {
         WebhookDelivery delivery = deliveries.findById(deliveryId).orElse(null);
-        if (delivery == null || delivery.getStatus() != WebhookDelivery.Status.PENDING) {
+        if (delivery == null || !delivery.leasedUntil(leaseUntil)) {
             return Optional.empty();
         }
         WebhookEndpoint endpoint = endpoints.findById(delivery.getEndpointId()).orElse(null);
@@ -74,29 +86,40 @@ public class WebhookDeliveryRecorder {
      * Records one attempt. 2xx succeeds; anything else is retried on the configured schedule, and gives
      * up after the last retry. Several give-ups in a row disable the endpoint.
      *
+     * @param leaseUntil the caller's claim; nothing is recorded if another instance has taken over since
      * @param statusCode the HTTP status, or null when no response came back
      * @param error      a short, fixed reason for failures (never the response body)
      */
     @Transactional
-    public void record(UUID deliveryId, Integer statusCode, String error) {
-        WebhookDelivery delivery = deliveries.findById(deliveryId).orElse(null);
-        if (delivery == null || delivery.getStatus() != WebhookDelivery.Status.PENDING) {
-            return; // cancelled while in flight
-        }
+    public void record(UUID deliveryId, Instant leaseUntil, Integer statusCode, String error) {
         boolean success = statusCode != null && statusCode >= 200 && statusCode < 300;
-        boolean givingUp = !success && delivery.getAttempts() + 1 >= properties.maxAttempts();
-        if (givingUp) {
-            // May disable the endpoint and write an audit event: take the tenant lock first, as every
-            // other writer does, before touching any row.
-            tenants.lockById(delivery.getTenantId()).orElseThrow();
+        if (!success) {
+            // A give-up may disable the endpoint and write an audit event. Take the tenant lock before
+            // loading or changing any row, as every other writer does, so the decision uses current state.
+            var progress = deliveries.progressOf(deliveryId).orElse(null);
+            if (progress == null) {
+                return;
+            }
+            if (progress.getAttempts() + 1 >= properties.maxAttempts()) {
+                tenants.lockById(progress.getTenantId()).orElseThrow();
+            }
+        }
+        // First load of the entity in this transaction, after any lock: current state.
+        record(deliveries.findById(deliveryId).orElse(null), leaseUntil, success, statusCode, error);
+    }
+
+    private void record(WebhookDelivery delivery, Instant leaseUntil, boolean success, Integer statusCode,
+                        String error) {
+        if (delivery == null || !delivery.leasedUntil(leaseUntil)) {
+            return; // cancelled, deleted or taken over by another instance while in flight
         }
         Instant now = Instant.now();
         delivery.recordAttempt(now, statusCode, success ? null : error);
-        WebhookEndpoint endpoint = endpoints.findById(delivery.getEndpointId()).orElseThrow();
+        boolean givingUp = !success && delivery.getAttempts() >= properties.maxAttempts();
 
         if (success) {
             delivery.succeed();
-            endpoint.deliverySucceeded();
+            endpoints.resetFailureStreak(delivery.getEndpointId());
             metrics.webhookDelivery("succeeded");
         } else if (!givingUp) {
             delivery.retryAt(now.plus(withJitter(properties.retryDelays().get(delivery.getAttempts() - 1))));
@@ -104,6 +127,7 @@ public class WebhookDeliveryRecorder {
         } else {
             delivery.fail();
             metrics.webhookDelivery("failed");
+            WebhookEndpoint endpoint = endpoints.findById(delivery.getEndpointId()).orElseThrow();
             int inRow = endpoint.deliveryFailed();
             if (endpoint.isEnabled() && inRow >= properties.disableAfterFailedDeliveries()) {
                 endpoint.disable();

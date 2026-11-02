@@ -45,8 +45,11 @@ public class WebhookService {
         this.audit = audit;
     }
 
-    @Transactional
-    public EndpointWithSecret create(UUID tenantId, CreateEndpointRequest request) {
+    /**
+     * Checks the event types and the URL (which resolves DNS). Call this outside any transaction, so a slow
+     * name server never holds a database connection, then pass the result to {@link #create}.
+     */
+    public ValidatedEndpoint validate(CreateEndpointRequest request) {
         List<String> types = List.copyOf(new LinkedHashSet<>(request.eventTypes()));
         for (String type : types) {
             if (!WebhookEventTypes.SUBSCRIBABLE.contains(type)) {
@@ -54,7 +57,17 @@ public class WebhookService {
                         "Unknown event type '" + type + "'. Supported: " + WebhookEventTypes.SUBSCRIBABLE);
             }
         }
-        URI url = urlPolicy.validate(request.url()); // resolves DNS: done before taking the tenant lock
+        String description = request.description() == null ? null : request.description().strip();
+        return new ValidatedEndpoint(urlPolicy.validate(request.url()), types, description);
+    }
+
+    public record ValidatedEndpoint(URI url, List<String> eventTypes, String description) {
+    }
+
+    @Transactional
+    public EndpointWithSecret create(UUID tenantId, ValidatedEndpoint request) {
+        URI url = request.url();
+        List<String> types = request.eventTypes();
         lockTenant(tenantId);
         if (endpoints.findLive(tenantId).size() >= properties.maxEndpointsPerTenant()) {
             throw ApiException.unprocessable("WEBHOOK_LIMIT_REACHED",
@@ -62,11 +75,11 @@ public class WebhookService {
         }
         UUID id = UUID.randomUUID();
         String secret = WebhookSigner.newSecret();
-        String description = request.description() == null ? null : request.description().strip();
         WebhookEndpoint endpoint = endpoints.save(new WebhookEndpoint(id, tenantId, url.toString(), types,
-                description, cipher.encrypt(id, secret)));
-        audit.append(tenantId, "WEBHOOK_ENDPOINT_CREATED", "endpointId=" + id + ";url=" + url.toString()
-                + ";events=" + String.join(",", types));
+                request.description(), cipher.encrypt(id, secret)));
+        // Host only: a URL's path or query can carry tokens, and the audit chain keeps everything forever.
+        audit.append(tenantId, "WEBHOOK_ENDPOINT_CREATED", "endpointId=" + id + ";host="
+                + url.getHost().replaceAll("[^A-Za-z0-9.:\\[\\]-]", "") + ";events=" + String.join(",", types));
         return new EndpointWithSecret(EndpointResponse.from(endpoint), secret);
     }
 

@@ -23,7 +23,7 @@ public class WebhookEvent {
     @Column(name = "event_type", nullable = false, updatable = false, length = 40)
     private String eventType;
 
-    @Column(nullable = false, updatable = false, length = 8000)
+    @Column(nullable = false, updatable = false, length = 100000)
     private String payload;
 
     @Column(name = "created_at", nullable = false, updatable = false)

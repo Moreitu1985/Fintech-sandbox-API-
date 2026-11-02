@@ -14,7 +14,7 @@ class WebhookCryptoTest {
 
     private static WebhookProperties props(String key, boolean require) {
         return new WebhookProperties(key, require, false, true, Duration.ofSeconds(1),
-                List.of(Duration.ofSeconds(30)), Duration.ofSeconds(3), Duration.ofSeconds(10), 5, 10, 16);
+                List.of(Duration.ofSeconds(30)), Duration.ofSeconds(3), Duration.ofSeconds(10), 5, 10, 16, 2, 4);
     }
 
     private static final String KEY = Base64.getEncoder().encodeToString(new byte[32]);

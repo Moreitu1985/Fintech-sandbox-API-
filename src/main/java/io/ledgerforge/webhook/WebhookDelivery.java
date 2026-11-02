@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -51,6 +52,9 @@ public class WebhookDelivery {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Version
+    private Long version;
+
     protected WebhookDelivery() {
     }
 
@@ -88,6 +92,11 @@ public class WebhookDelivery {
     void cancel(String reason) {
         this.status = Status.CANCELLED;
         this.lastError = reason;
+    }
+
+    /** Whether this caller still holds the lease it claimed (no other instance has taken it over). */
+    boolean leasedUntil(Instant leaseUntil) {
+        return status == Status.PENDING && nextAttemptAt.equals(leaseUntil);
     }
 
     /** A tenant asked for another go at a delivery that gave up. */

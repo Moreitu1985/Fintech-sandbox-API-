@@ -39,9 +39,10 @@ class WebhookUrlPolicyTest {
             "https://hooks.example.com:443/ledger?x=1",
             "https://93.184.216.34/hook",
             "https://v6.example.com/hook",
-            "https://[2606:4700::6810:85e5]/hook"})
+            "https://[2606:4700::6810:85e5]/hook",
+            "HTTPS://hooks.example.com/upper"})
     void publicHttpsTargetsAreAllowed(String url) {
-        assertThat(strict.validate(url)).isNotNull();
+        assertThat(strict.validate(url).getScheme()).isEqualTo("https");
     }
 
     @ParameterizedTest
@@ -73,11 +74,34 @@ class WebhookUrlPolicyTest {
             "https://[::ffff:a9fe:a9fe]/hook",          // IPv4-mapped 169.254.169.254
             "https://[fe80::1]/hook",
             "https://[fc00::1]/hook",
-            "https://[2001:db8::1]/hook"})
+            "https://[2001:db8::1]/hook",
+            "https://[::127.0.0.1]/hook",               // IPv4-compatible loopback
+            "https://[2002:7f00:1::1]/hook",            // 6to4 tunnel to 127.0.0.1
+            "https://[2001:0:4136:e378::1]/hook",       // Teredo tunnel
+            "https://2130706433/hook",                  // 127.0.0.1 as one decimal number
+            "https://0x7f.1/hook",                      // hex/short IPv4 forms
+            "https://017700000001/hook"})               // octal
     void privateOrUnsafeTargetsAreRefused(String url) {
         assertThatThrownBy(() -> strict.validate(url))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).code()).isEqualTo(WebhookUrlPolicy.CODE);
+    }
+
+    @Test
+    void unknownAndPrivateHostsGetTheSameAnswer() {
+        // Otherwise a tenant could probe which internal names exist.
+        String unknown = refusalMessage("https://unknown.example.com/hook");
+        String internal = refusalMessage("https://rebind.example.com/hook");
+        assertThat(unknown).isEqualTo(internal);
+    }
+
+    private String refusalMessage(String url) {
+        try {
+            strict.validate(url);
+            throw new AssertionError("expected a refusal for " + url);
+        } catch (ApiException e) {
+            return e.getMessage();
+        }
     }
 
     @Test

@@ -43,7 +43,8 @@ public class WebhookController {
     @PostMapping
     public ResponseEntity<EndpointWithSecret> create(@AuthenticationPrincipal TenantPrincipal caller,
                                                      @Valid @RequestBody CreateEndpointRequest request) {
-        EndpointWithSecret created = webhooks.create(caller.tenantId(), request);
+        // Validation resolves DNS, so it runs before (outside) the database transaction.
+        EndpointWithSecret created = webhooks.create(caller.tenantId(), webhooks.validate(request));
         return ResponseEntity.created(URI.create("/v1/webhooks/" + created.endpoint().id())).body(created);
     }
 

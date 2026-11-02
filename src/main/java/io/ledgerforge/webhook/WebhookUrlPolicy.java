@@ -11,6 +11,13 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.time.Duration;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.Locale;
 
 /**
@@ -26,6 +33,7 @@ import java.util.Locale;
 public class WebhookUrlPolicy {
 
     public static final String CODE = "WEBHOOK_URL_NOT_ALLOWED";
+    private static final String HOST_REFUSED = "host must resolve to public internet addresses only";
 
     private final boolean allowInsecure;
     private final Resolver resolver;
@@ -36,9 +44,28 @@ public class WebhookUrlPolicy {
         InetAddress[] resolve(String host) throws UnknownHostException;
     }
 
+    private static final ExecutorService DNS = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Duration DNS_TIMEOUT = Duration.ofSeconds(2);
+
     @Autowired
     public WebhookUrlPolicy(WebhookProperties properties) {
-        this(properties.allowInsecureTargets(), InetAddress::getAllByName);
+        this(properties.allowInsecureTargets(), WebhookUrlPolicy::resolveWithTimeout);
+    }
+
+    /** A name server that never answers must not hold a request (or a send slot) for long. */
+    static InetAddress[] resolveWithTimeout(String host) throws UnknownHostException {
+        Future<InetAddress[]> lookup = DNS.submit(() -> InetAddress.getAllByName(host));
+        try {
+            return lookup.get(DNS_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            lookup.cancel(true);
+            throw new UnknownHostException("lookup timed out");
+        } catch (ExecutionException e) {
+            throw new UnknownHostException("lookup failed");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new UnknownHostException("interrupted");
+        }
     }
 
     public WebhookUrlPolicy(boolean allowInsecure, Resolver resolver) {
@@ -58,24 +85,26 @@ public class WebhookUrlPolicy {
         if (allowInsecure) {
             return;
         }
-        if (!"https".equals(uri.getScheme())) {
+        if (!"https".equalsIgnoreCase(uri.getScheme())) {
             throw refused("must use https");
         }
         if (uri.getPort() != -1 && uri.getPort() != 443) {
             throw refused("must use the standard HTTPS port (443)");
         }
+        // One message whether the name doesn't resolve or resolves somewhere private: a tenant must not be
+        // able to probe which internal names exist.
         InetAddress[] addresses;
         try {
             addresses = resolver.resolve(hostOf(uri));
         } catch (UnknownHostException e) {
-            throw refused("host name does not resolve");
+            throw refused(HOST_REFUSED);
         }
         if (addresses.length == 0) {
-            throw refused("host name does not resolve");
+            throw refused(HOST_REFUSED);
         }
         for (InetAddress address : addresses) {
             if (!isPublic(address)) {
-                throw refused("points to a private, loopback or reserved address");
+                throw refused(HOST_REFUSED);
             }
         }
     }
@@ -99,6 +128,9 @@ public class WebhookUrlPolicy {
         }
         if (uri.getRawFragment() != null) {
             throw refused("must not contain a fragment");
+        }
+        if (!uri.getScheme().equals(scheme)) {
+            uri = URI.create(scheme + uri.toString().substring(uri.getScheme().length())); // HTTPS:// -> https://
         }
         return uri.normalize();
     }
@@ -132,6 +164,12 @@ public class WebhookUrlPolicy {
             }
             if (first == 0x20 && (b[1] & 0xff) == 0x01 && (b[2] & 0xff) == 0x0d && (b[3] & 0xff) == 0xb8) {
                 return false;                       // 2001:db8::/32 documentation
+            }
+            if (first == 0x20 && (b[1] & 0xff) == 0x01 && b[2] == 0 && b[3] == 0) {
+                return false;                       // 2001::/32 Teredo: tunnels to an embedded IPv4 address
+            }
+            if (first == 0x20 && (b[1] & 0xff) == 0x02) {
+                return false;                       // 2002::/16 6to4: tunnels to an embedded IPv4 address
             }
             if (first == 0x00 || first == 0xff) {   // ::/8 reserved, ff00::/8 multicast
                 return false;

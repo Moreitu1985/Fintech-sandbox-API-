@@ -2,8 +2,6 @@ package io.ledgerforge.webhook;
 
 import io.ledgerforge.postgres.PostgresTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -23,17 +21,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @PostgresTest
 class PostgresWebhookTest extends WebhookTest {
 
-    @Autowired
-    WebhookDeliveryRecorder recorder;
-    @Autowired
-    WebhookEndpointRepository endpoints;
-    @Autowired
-    WebhookEventRepository events;
-    @Autowired
-    WebhookDeliveryRepository deliveries;
-    @Autowired
-    TransactionTemplate tx;
-
     @Test
     void exactlyOneInstanceWinsTheClaimOnADelivery() throws Exception {
         Tenant t = newTenant();
@@ -46,9 +33,9 @@ class PostgresWebhookTest extends WebhookTest {
             events.save(new WebhookEvent(eventId, t.id(), "transfer.posted", "{}", Instant.now()));
             // Not due for an hour, so the running dispatcher leaves it alone.
             WebhookDelivery d = new WebhookDelivery(t.id(), endpointId, eventId, future);
-            return deliveries.save(d).getId();
+            return deliveryRows.save(d).getId();
         });
-        Instant seen = deliveries.findById(deliveryId).orElseThrow().getNextAttemptAt();
+        Instant seen = deliveryRows.findById(deliveryId).orElseThrow().getNextAttemptAt();
 
         int racers = 8;
         ExecutorService pool = Executors.newFixedThreadPool(racers);
