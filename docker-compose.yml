@@ -20,7 +20,14 @@ services:
         condition: service_healthy
       fraud:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
+      RATE_LIMIT_STORE: redis
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      REDIS_HEALTH_ENABLED: "true"
+      LEDGERFORGE_METRICS_TOKEN: ${LEDGERFORGE_METRICS_TOKEN:-}
       SPRING_PROFILES_ACTIVE: prod
       FRAUD_ENABLED: "true"
       FRAUD_SERVICE_URL: http://fraud:8090
@@ -31,6 +38,18 @@ services:
       LEDGERFORGE_ADMIN_TOKEN: ${LEDGERFORGE_ADMIN_TOKEN:?Set LEDGERFORGE_ADMIN_TOKEN in .env}
     ports:
       - "8080:8080"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # Not published to the host: only the ledger API talks to it.
 
   fraud:
     build: ./fraud-service

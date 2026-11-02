@@ -13,6 +13,14 @@ spring:
           time_zone: UTC
   flyway:
     locations: classpath:db/migration/common,classpath:db/migration/{vendor}
+  data:
+    redis:
+      repositories:
+        enabled: false      # Redis holds rate-limit buckets only; all repositories are JPA
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 500ms        # a slow limiter must not slow every request
 
 server:
   shutdown: graceful
@@ -24,18 +32,31 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus,metrics   # prometheus/metrics need the metrics token
   endpoint:
     health:
       probes:
         enabled: true
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_ENABLED:false}   # on only where Redis is actually used
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:0.1}
+  # Traces are exported only when MANAGEMENT_OTLP_TRACING_ENDPOINT is set (e.g. http://otel-collector:4318/v1/traces).
+  observations:
+    key-values:
+      application: ledgerforge
 
 ledgerforge:
   # Required for /admin endpoints. Must be at least 32 characters. Leave empty to disable admin.
   admin-token: ${LEDGERFORGE_ADMIN_TOKEN:}
+  # Read-only secret for Prometheus scraping (32+ characters, different from the admin token).
+  metrics-token: ${LEDGERFORGE_METRICS_TOKEN:}
   rate-limit:
     capacity: 100            # burst size per API key (or per IP when unauthenticated)
     refill-per-second: 50
+    store: ${RATE_LIMIT_STORE:memory}   # memory (per instance) or redis (shared by all instances)
   plugins:
     max-transfer:
       enabled: true

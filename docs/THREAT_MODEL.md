@@ -21,6 +21,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Threat | Example | Mitigation | Status |
 |---|---|---|---|
 | **S**poofing | Stolen or guessed API key | 256-bit random keys; only SHA-256 hashes stored; constant-time comparison; immediate revocation; per-IP rate limit slows guessing | Implemented |
+| Information disclosure | Metrics endpoint leaks operational data | `/actuator/prometheus` needs a separate read-only metrics token; tenant keys and the admin token are refused; metric tags never contain ids | Implemented |
 | Spoofing | Admin token brute force | 32+ character token enforced at startup; constant-time comparison; rate limited; admin disabled when unset | Implemented |
 | Spoofing | Key replay from a compromised client | mTLS-bound OAuth2 client credentials | Planned (Phase 3) |
 | **T**ampering | Double charge via retried request | Idempotency keys scoped per tenant with request-hash check | Implemented |
@@ -32,7 +33,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Information disclosure | Stack traces or SQL in errors | Problem+json errors with generic messages; stack traces disabled | Implemented |
 | Information disclosure | Keys leaked from database backup | Only hashes are stored | Implemented |
 | Information disclosure | Traffic interception | HTTPS with HSTS at the edge | Partial (TLS termination in deployment) |
-| **D**enial of service | Request flood | Token-bucket limits per key and per IP | Implemented (per instance; Redis in Phase 3) |
+| **D**enial of service | Request flood | Token-bucket limits per key and per IP, shared across instances in Redis (atomic Lua script, Redis clock); fails open if Redis is down (ADR 0007) | Implemented |
 | Denial of service | Oversized or malicious input | Bean Validation limits on every field; amount ceiling; paging capped at 100 | Implemented |
 | Tampering | Fraudulent transfer from a taken-over account | ML fraud check before money moves: BLOCK refuses, REVIEW is audited with reasons | Implemented (Phase 2) |
 | Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Shared 32+ char service token, constant-time check; service only on the internal Docker network | Implemented (mTLS in Phase 3) |
@@ -60,7 +61,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 
 ## Known gaps (honest list)
 
-- Rate limits are per instance until Redis is added.
+- If Redis is down, rate limits are not enforced (fail-open by design, visible in metrics and health).
 - The audit chain proves tampering but cannot stop a full database administrator from rewriting it; external anchoring is planned.
 - No end-user (customer) authentication: tenants authenticate, and they are responsible for their own users.
 - Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned for Phase 3. Every other fixable CRITICAL/HIGH finding fails the build.
