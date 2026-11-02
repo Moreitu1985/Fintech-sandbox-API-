@@ -4,6 +4,8 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.proc.DefaultJOSEObjectTypeVerifier;
 import io.ledgerforge.security.TenantPrincipal;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -37,6 +39,7 @@ public class OAuthConfig {
 
     static final String TENANT_CLAIM = "tid";
     static final String SCOPE_CLAIM = "scope";
+    static final JOSEObjectType ACCESS_TOKEN_TYPE = new JOSEObjectType("at+jwt");
 
     // header.payload.signature in base64url: API keys (lf_test_...) and the metrics token never look like this.
     private static final Pattern JWT_SHAPE = Pattern.compile("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$");
@@ -56,6 +59,9 @@ public class OAuthConfig {
     JwtDecoder jwtDecoder(RSAKey tokenSigningKey, OAuthProperties props) throws JOSEException {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey(tokenSigningKey.toRSAPublicKey())
                 .signatureAlgorithm(SignatureAlgorithm.RS256)
+                // RFC 9068: access tokens are typed "at+jwt", so no other kind of JWT can pass as one.
+                .jwtProcessorCustomizer(processor -> processor.setJWSTypeVerifier(
+                        new DefaultJOSEObjectTypeVerifier<>(ACCESS_TOKEN_TYPE)))
                 .build();
         OAuth2TokenValidator<Jwt> audience = jwt -> jwt.getAudience() != null
                 && jwt.getAudience().contains(props.audience())

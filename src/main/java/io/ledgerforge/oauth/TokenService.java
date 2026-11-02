@@ -89,7 +89,7 @@ public class TokenService {
                 .notBefore(now)
                 .expiresAt(now.plus(props.tokenTtl()))
                 .build();
-        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(keyId).type("at+jwt").build();
+        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(keyId).type(OAuthConfig.ACCESS_TOKEN_TYPE.getType()).build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
 
         audit.appendIndependently(client.tenantId(), "ACCESS_TOKEN_ISSUED", "keyId=" + client.keyId()

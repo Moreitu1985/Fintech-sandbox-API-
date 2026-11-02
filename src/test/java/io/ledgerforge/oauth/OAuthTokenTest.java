@@ -85,6 +85,7 @@ class OAuthTokenTest extends IntegrationTestBase {
         JsonNode claims = json.readTree(Base64.getUrlDecoder().decode(parts[1]));
         assertThat(head.get("alg").asText()).isEqualTo("RS256");
         assertThat(head.get("kid").asText()).isEqualTo(tokenSigningKey.getKeyID());
+        assertThat(head.get("typ").asText()).isEqualTo("at+jwt");
         assertThat(claims.get("tid").asText()).isEqualTo(tenant.id().toString());
         assertThat(claims.get("sub").asText()).isEqualTo(tenant.keyId().toString());
         assertThat(claims.get("aud").toString()).contains("ledgerforge-api");
@@ -188,7 +189,13 @@ class OAuthTokenTest extends IntegrationTestBase {
         String forged = sign(new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(foreignKey))),
                 claims(Instant.now(), "ledgerforge-api"));
 
-        for (String bad : List.of(tampered, expired, otherAudience, forged)) {
+        // Valid in every way except its type: a plain "JWT" (e.g. some other system's token) is not an access token.
+        String untyped = sign(ourEncoder, claims(Instant.now(), "ledgerforge-api"), "JWT");
+        String control = sign(ourEncoder, claims(Instant.now(), "ledgerforge-api"), "at+jwt");
+        mvc.perform(get("/v1/accounts").header("Authorization", "Bearer " + control))
+                .andExpect(status().isOk()); // the same construction, correctly typed and signed, is accepted
+
+        for (String bad : List.of(tampered, expired, otherAudience, forged, untyped)) {
             mvc.perform(get("/v1/accounts").header("Authorization", "Bearer " + bad))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
@@ -216,7 +223,11 @@ class OAuthTokenTest extends IntegrationTestBase {
     }
 
     private String sign(JwtEncoder encoder, JwtClaimsSet claims) {
-        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(tokenSigningKey.getKeyID()).build();
+        return sign(encoder, claims, "at+jwt");
+    }
+
+    private String sign(JwtEncoder encoder, JwtClaimsSet claims, String type) {
+        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(tokenSigningKey.getKeyID()).type(type).build();
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 }
