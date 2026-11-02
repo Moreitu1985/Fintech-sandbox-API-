@@ -34,6 +34,8 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Information disclosure | Keys leaked from database backup | Only hashes are stored | Implemented |
 | Information disclosure | Traffic interception | HTTPS with HSTS at the edge | Partial (TLS termination in deployment) |
 | **D**enial of service | Request flood | Token-bucket limits per key and per IP, shared across instances in Redis (atomic Lua script, Redis clock); API limits fail open and the AI assistant's limit fails closed if Redis is down, behind a circuit breaker (ADR 0007) | Implemented |
+| Denial of service | Token endpoint used to flood the audit chain or hold the tenant lock | 10 tokens per minute per client, counted after authentication | Implemented |
+| Information disclosure | API key sent in a token-request URL lands in logs | Parameters in the URL are refused | Implemented |
 | Denial of service | Oversized or malicious input | Bean Validation limits on every field; amount ceiling; paging capped at 100 | Implemented |
 | Tampering | Fraudulent transfer from a taken-over account | ML fraud check before money moves: BLOCK refuses, REVIEW is audited with reasons | Implemented (Phase 2) |
 | Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Mutual TLS with a CA dedicated to this link (each side verifies the other; no plain-HTTP downgrade; a certificate failure always refuses the transfer), plus a 32+ char service token; service only on the internal network; each container reads only its own key | Implemented (ADR 0008) |

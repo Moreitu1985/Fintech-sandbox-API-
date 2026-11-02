@@ -24,7 +24,7 @@ Until now every call carried the long-lived API key: anything that logged, cache
 - The ledger presents its client certificate (a Spring Boot SSL bundle) and accepts **only a server certificate from that CA**, so an impostor service can't receive transfer data or approve a transfer.
 - With a bundle configured, a plain `http://` URL is refused at startup: mutual TLS is never silently downgraded.
 - The shared `X-Service-Token` stays as a second layer.
-- **A TLS failure is a security event, not an outage.** An impostor, an untrusted or expired certificate, or a missing client certificate always refuses the transfer, even with fail-open on. Only genuine outages (timeouts, refused connections, 5xx) follow the fail-open policy.
+- **A TLS failure is a security event, not an outage.** An impostor, an untrusted or expired certificate, or a missing client certificate always refuses the transfer, even with fail-open on. Under TLS 1.3 a server that rejects a client certificate may simply drop the connection after the handshake, so with mTLS on any connection failure that isn't a recognised outage (connection refused, timeout, unknown host) is treated the same way. Only those outages and 5xx answers follow the fail-open policy.
 - `scripts/generate-dev-certs.sh` creates a development CA. `docker compose` runs it in a one-shot `certs` service that gives each service its own folder, readable only by that service's user (mode 0400 keys), generates the token-signing key as a file, and deletes the CA key. Production certificates come from a real PKI or secrets manager.
 - Test-only certificates live in `src/test/resources/mtls` (CA keys deleted) and are allowlisted for secret scanners in `.gitleaks.toml`.
 

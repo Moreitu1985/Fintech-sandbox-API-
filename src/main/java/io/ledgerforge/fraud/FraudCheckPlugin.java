@@ -19,6 +19,11 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import javax.net.ssl.SSLException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.net.http.HttpTimeoutException;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -52,6 +57,7 @@ public class FraudCheckPlugin implements TransferPlugin {
     private final AccountRepository accounts;
     private final AuditService audit;
     private final LedgerMetrics metrics;
+    private final boolean mutualTls;
 
     public FraudCheckPlugin(FraudProperties props, FraudFeatureCalculator features, AccountRepository accounts,
                             AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder,
@@ -65,6 +71,7 @@ public class FraudCheckPlugin implements TransferPlugin {
         }
         this.props = props;
         this.client = new FraudClient(props, restClientBuilder, sslBundles);
+        this.mutualTls = props.sslBundle() != null && !props.sslBundle().isBlank();
         this.metrics = metrics;
         this.features = features;
         this.accounts = accounts;
@@ -96,11 +103,12 @@ public class FraudCheckPlugin implements TransferPlugin {
         try {
             result = client.score(new FraudModels.ScoreRequest(transfer.reference(), features.compute(transfer, source)));
         } catch (ResourceAccessException | HttpServerErrorException outage) {
-            if (causedByTls(outage)) {
+            if (outage instanceof ResourceAccessException && isSecurityFailure(outage)) {
                 // A certificate problem (impostor, wrong CA, expired cert) is a security event, not an outage:
                 // never let it switch scoring off, whatever the fail-open setting says.
                 metrics.fraudDecision("error");
-                log.error("TLS handshake with the fraud service failed; refusing transfer: {}", outage.getMessage());
+                log.error("Secure connection to the fraud service failed (certificate or TLS problem); "
+                        + "refusing transfer: {}", outage.getMessage());
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_CHECK_UNAVAILABLE",
                         "The fraud check could not be completed. The platform operator has been alerted.");
             }
@@ -138,13 +146,25 @@ public class FraudCheckPlugin implements TransferPlugin {
         }
     }
 
-    private static boolean causedByTls(Throwable e) {
+    /**
+     * A TLS error is always a security failure. With mutual TLS on, so is any other connection failure that
+     * isn't a recognised outage: under TLS 1.3 a server that rejects our client certificate may only drop the
+     * connection after the handshake, which the client sees as a reset or end-of-stream rather than a TLS
+     * error. Only connection refused, timeouts and unknown hosts count as outages (and 5xx, handled separately).
+     */
+    private boolean isSecurityFailure(Throwable e) {
+        boolean recognisedOutage = false;
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof SSLException) {
                 return true;
             }
+            if (t instanceof ConnectException || t instanceof SocketTimeoutException
+                    || t instanceof HttpTimeoutException || t instanceof UnknownHostException
+                    || t instanceof NoRouteToHostException) {
+                recognisedOutage = true;
+            }
         }
-        return false;
+        return mutualTls && !recognisedOutage;
     }
 
     private static String truncate(String s, int max) {
