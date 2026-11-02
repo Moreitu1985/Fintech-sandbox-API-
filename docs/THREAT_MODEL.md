@@ -25,7 +25,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Spoofing | Key replay from a compromised client | mTLS-bound OAuth2 client credentials | Planned (Phase 3) |
 | **T**ampering | Double charge via retried request | Idempotency keys scoped per tenant with request-hash check | Implemented |
 | Tampering | Race condition corrupts balance | Pessimistic row locks in a fixed order; `@Version` as a backstop | Implemented |
-| Tampering | Insider edits history in the database | PostgreSQL triggers make transactions, postings and audit append-only; hash chain detects edits | Implemented |
+| Tampering | Insider edits history in the database | PostgreSQL triggers make transactions, postings and audit append-only (proven against real PostgreSQL in CI by `AppendOnlyHistoryTest`); hash chain detects edits | Implemented |
 | Tampering | Attacker with DB superuser recomputes the whole chain | Periodically anchor the latest chain hash outside the database (e.g. signed, timestamped export) | Planned (Phase 3) |
 | **R**epudiation | Tenant denies making a transfer | Every change is an audit event tied to tenant and key; request ids in logs | Partial (key id per event in Phase 3) |
 | **I**nformation disclosure | Tenant reads another tenant's account | Every query scoped by tenant from the authenticated key; foreign ids return 404 | Implemented |

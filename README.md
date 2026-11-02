@@ -182,6 +182,7 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `ConcurrencyTest` | 200 parallel random transfers: total money conserved, no negative balances, integrity healthy |
 | `IdempotencyTest` | Retries move money once; reusing a key with a different body is rejected |
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
+| PostgreSQL suite (`Postgres*Test`, `AppendOnlyHistoryTest`, `PostgresQueriesTest`) | Concurrency, idempotency, tenant isolation and transfer tests re-run on real PostgreSQL 16 via Testcontainers; the database itself refuses to update or delete postings, transfers and audit events; the fraud and assistant queries return correct figures; a blocked transfer's audit evidence survives the rollback. CI fails if these are skipped |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |
 | `FraudCheckPluginTest`, `FraudCheckFailClosedTest` | Features sent to the model are computed correctly; BLOCK moves no money; REVIEW is audited; outages fail open or closed as configured |
@@ -208,13 +209,13 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
-| 3 | OAuth2 + mTLS, Redis rate limits, OpenTelemetry, Testcontainers, Kubernetes, load tests | Planned |
+| 3 | PostgreSQL tests with Testcontainers (done); Redis rate limits, OpenTelemetry, OAuth2 + mTLS, load tests, Kubernetes | In progress |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
 ## Tech stack
 
-**Ledger:** Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 (tests) · springdoc OpenAPI · JUnit 5
+**Ledger:** Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 and Testcontainers PostgreSQL (tests) · springdoc OpenAPI · JUnit 5
 
 **AI:** Claude API (tool use) for the ledger assistant
 
