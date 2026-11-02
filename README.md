@@ -35,6 +35,7 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | AI ledger assistant | `POST /v1/assistant/ask` answers plain-English questions about your own ledger with Claude, through read-only tools scoped to your tenant ([ADR 0006](docs/adr/0006-ai-assistant-read-only-tools.md)) |
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
 | Authentication | API keys, or OAuth 2.0 client credentials: 15-minute RS256 access tokens with scopes (`ledger:read`, `ledger:write`, `assistant`) and a public JWKS ([ADR 0008](docs/adr/0008-oauth2-tokens-and-mtls.md)) |
+| Webhooks | Signed `transfer.posted` and `account.created` events in the [Standard Webhooks](https://www.standardwebhooks.com) format, written in the same transaction as the money movement and delivered with retries; SSRF-guarded URLs and encrypted signing secrets ([ADR 0010](docs/adr/0010-webhooks.md)) |
 | Service-to-service security | Mutual TLS between the ledger and the fraud service: each side proves its identity with a certificate from a private CA, plus a service token |
 | API security | Hashed API keys, constant-time checks, rate limits shared across instances in Redis, strict headers, RFC 9457 errors with request ids |
 | Observability | Prometheus metrics (transfers, fraud decisions, assistant tokens, rate limiting, HTTP, DB pool, JVM) behind a read-only metrics token; OpenTelemetry traces of API requests and fraud-service calls ([guide](docs/OBSERVABILITY.md)) |
@@ -195,6 +196,11 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | GET | `/v1/transfers/{id}` | Get a transfer |
 | GET | `/v1/ledger/integrity` | Balance and audit-chain proof |
 | GET | `/v1/plugins` | Active plugins |
+| POST · GET | `/v1/webhooks` | Register an endpoint (secret shown once) · list endpoints |
+| GET · DELETE | `/v1/webhooks/{id}` | Get · delete an endpoint |
+| POST | `/v1/webhooks/{id}/rotate-secret` · `/enable` · `/test` | Rotate the signing secret · re-enable · send a test event |
+| GET | `/v1/webhooks/{id}/deliveries` | Delivery history: status, attempts, last response |
+| POST | `/v1/webhooks/deliveries/{id}/retry` | Retry a failed delivery |
 | POST | `/oauth/token` | OAuth 2.0 client credentials: API key in, 15-minute access token out |
 | GET | `/oauth/jwks.json` | Public key for verifying access tokens |
 
@@ -219,6 +225,7 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `FraudCheckPluginTest`, `FraudCheckFailClosedTest` | Features sent to the model are computed correctly; BLOCK moves no money; REVIEW is audited; outages fail open or closed as configured |
 | `AssistantTest` | Tools only ever see the caller's tenant; bad or unknown tool calls become recoverable errors; exact decimal amounts; tool loop and parallel calls capped; truncated or refused answers marked incomplete; links stripped; every question audited, including failed ones; Claude outage gives 503 |
 | `fraud-service/tests` (pytest) | Scoring API, auth, validation, and model quality gates that fail CI if a retrained model gets worse |
+| `WebhookTest`, `PostgresWebhookTest`, `WebhookUrlPolicyTest`, `WebhookCryptoTest` | Events arrive signed (verified against the Standard Webhooks test vector) and only for subscribed types; failed transfers send nothing; retries keep the same id and body; repeated give-ups disable an endpoint; rotated secrets take over at once; tenants can't see or touch each other's endpoints; exactly one instance wins each delivery; private, loopback, metadata and IPv4-mapped addresses are refused; secrets are encrypted and bound to their endpoint |
 | `TransferFlowTest` | Insufficient funds, currency mismatch, plugin limits and validation errors behave correctly |
 
 ## Performance under load
@@ -262,6 +269,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 7. [Rate limits shared across instances in Redis](docs/adr/0007-shared-rate-limiting-in-redis.md)
 8. [Short-lived OAuth 2.0 tokens and mutual TLS](docs/adr/0008-oauth2-tokens-and-mtls.md)
 9. [Kubernetes on EKS, provisioned with Terraform](docs/adr/0009-kubernetes-and-terraform-on-aws.md)
+10. [Webhooks: transactional outbox, signed at-least-once delivery](docs/adr/0010-webhooks.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -272,7 +280,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
 | 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS, k6 load tests, Kubernetes, Terraform for AWS | Done |
-| 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
+| 4 | Webhooks (done); TypeScript SDK, Next.js developer dashboard | In progress |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
 ## Tech stack
