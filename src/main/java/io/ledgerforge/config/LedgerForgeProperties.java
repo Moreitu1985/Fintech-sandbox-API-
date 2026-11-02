@@ -38,5 +38,12 @@ public record LedgerForgeProperties(String adminToken, String metricsToken, @Def
      */
     public record RateLimit(@DefaultValue("100") long capacity, @DefaultValue("50") double refillPerSecond,
                             @DefaultValue("memory") Store store) {
+        public RateLimit {
+            // A zero refill rate would lock clients out for good while telling them to retry.
+            if (capacity < 1 || !(refillPerSecond > 0)) {
+                throw new IllegalArgumentException(
+                        "ledgerforge.rate-limit: capacity must be >= 1 and refill-per-second > 0");
+            }
+        }
     }
 }

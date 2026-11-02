@@ -90,6 +90,9 @@ public class LedgerController {
         } catch (ApiException e) {
             metrics.transfer("rejected", e.code());
             throw e;
+        } catch (RuntimeException e) {
+            metrics.transfer("error", "INTERNAL");
+            throw e;
         }
         metrics.transfer(result.replayed() ? "replayed" : "posted", "none");
         if (result.replayed()) {

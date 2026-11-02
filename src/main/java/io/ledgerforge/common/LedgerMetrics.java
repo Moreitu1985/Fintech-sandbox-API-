@@ -53,4 +53,12 @@ public class LedgerMetrics {
                 .register(registry)
                 .increment();
     }
+
+    /** The shared rate-limit store failed or was skipped by its circuit breaker. */
+    public void rateLimiterError() {
+        Counter.builder("ledgerforge.rate_limiter.errors")
+                .description("Rate-limit store failures (fail-open or fail-closed decisions taken without Redis)")
+                .register(registry)
+                .increment();
+    }
 }

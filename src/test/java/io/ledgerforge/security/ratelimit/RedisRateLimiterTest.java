@@ -14,6 +14,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -105,12 +106,20 @@ class RedisRateLimiterTest {
     }
 
     @Test
-    void failsOpenWhenRedisIsUnreachable() {
+    void failsOpenOrClosedAsAskedAndTripsTheBreaker() {
         LettuceConnectionFactory dead = connect("127.0.0.1", 1); // nothing listens on port 1
+        AtomicInteger errors = new AtomicInteger();
         try {
-            RedisRateLimiter limiter = limiter(dead);
-            assertThat(limiter.tryAcquire(key(), 1, 0.001).allowed()).isTrue();
-            assertThat(limiter.tryAcquire(key(), 1, 0.001).allowed()).isTrue();
+            RedisRateLimiter limiter = new RedisRateLimiter(new StringRedisTemplate(dead), errors::incrementAndGet);
+            assertThat(limiter.tryAcquire(key(), 1, 0.001, true).allowed()).as("fail-open").isTrue();
+
+            long start = System.nanoTime();
+            RateLimiter.Decision closed = limiter.tryAcquire(key(), 1, 0.001, false);
+            long tookMs = (System.nanoTime() - start) / 1_000_000;
+            assertThat(closed.allowed()).as("fail-closed").isFalse();
+            assertThat(closed.retryAfterSeconds()).isEqualTo(RedisRateLimiter.UNAVAILABLE_RETRY_SECONDS);
+            assertThat(tookMs).as("breaker open: Redis not called again").isLessThan(50);
+            assertThat(errors.get()).isEqualTo(2);
         } finally {
             dead.destroy();
         }

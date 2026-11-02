@@ -23,11 +23,12 @@ scrape_configs:
 
 | Metric | Tags | Meaning |
 |---|---|---|
-| `ledgerforge_transfers_total` | `outcome` (posted, replayed, rejected), `reason` (error code) | Transfer requests by result |
+| `ledgerforge_transfers_total` | `outcome` (posted, replayed, rejected, error), `reason` (error code) | Business outcome of transfer requests that reached the ledger (`error` = unexpected failure). Malformed requests rejected before that (invalid body, missing `Idempotency-Key`) show in `http_server_requests_seconds_count{uri="/v1/transfers",status="400"}` |
 | `ledgerforge_fraud_decisions_total` | `decision` (ALLOW, REVIEW, BLOCK, unavailable, error) | Fraud-model decisions |
 | `ledgerforge_assistant_questions_total` | `outcome` | AI assistant questions |
 | `ledgerforge_assistant_tokens_total` | `direction` (input, output) | Claude tokens used (cost) |
 | `ledgerforge_rate_limited_total` | `client` (api_key, ip) | Requests refused by the rate limiter |
+| `ledgerforge_rate_limiter_errors_total` | | Redis unavailable: decisions taken without the shared store (alert on any) |
 
 Tags are small fixed sets, never tenant or account ids, so the number of time series stays bounded.
 
@@ -41,11 +42,12 @@ Spring also exports HTTP latency (`http_server_requests_seconds`), outbound call
 | Block rate jumps | BLOCK share of decisions doubles against the previous day |
 | Assistant cost | `increase(ledgerforge_assistant_tokens_total[1h])` above budget |
 | Abuse | `rate(ledgerforge_rate_limited_total[5m])` sustained |
+| Rate limiter degraded | `increase(ledgerforge_rate_limiter_errors_total[5m]) > 0` |
 | Latency | p99 of `http_server_requests_seconds{uri="/v1/transfers"}` above 500 ms |
 
 ## Traces
 
-Tracing uses Micrometer Tracing with the OpenTelemetry bridge. Spans cover incoming requests, JDBC-backed observations and the call to the fraud service, and the W3C `traceparent` header is passed on to it.
+Tracing uses Micrometer Tracing with the OpenTelemetry bridge. Spans cover incoming HTTP requests and the outbound call to the fraud service, and the W3C `traceparent` header is sent with that call. The fraud service does not record spans yet, so a trace ends at the ledger's client span; database queries are not traced individually (HikariCP pool metrics cover the database).
 
 Export is off until an endpoint is set:
 
@@ -58,4 +60,4 @@ Any OTLP backend works: Jaeger, Grafana Tempo, Honeycomb or the OpenTelemetry Co
 
 ## Health
 
-`/actuator/health` (public) includes the database, and Redis when `REDIS_HEALTH_ENABLED=true`. Liveness and readiness probes are at `/actuator/health/liveness` and `/actuator/health/readiness`.
+`/actuator/health` (public) includes the database. The Redis health check is off by default (`REDIS_HEALTH_ENABLED`): because rate limiting fails open, a Redis outage should not make the load balancer remove healthy instances. Watch `ledgerforge_rate_limiter_errors_total` instead. Liveness and readiness probes are at `/actuator/health/liveness` and `/actuator/health/readiness`.

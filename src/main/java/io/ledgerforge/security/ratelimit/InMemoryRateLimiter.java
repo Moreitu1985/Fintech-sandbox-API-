@@ -12,7 +12,7 @@ public class InMemoryRateLimiter implements RateLimiter {
     private final Map<String, TokenBucket> buckets = new ConcurrentHashMap<>();
 
     @Override
-    public Decision tryAcquire(String key, long capacity, double refillPerSecond) {
+    public Decision tryAcquire(String key, long capacity, double refillPerSecond, boolean failOpen) {
         if (buckets.size() > MAX_TRACKED_KEYS) {
             buckets.clear(); // bound memory under a flood of distinct clients
         }

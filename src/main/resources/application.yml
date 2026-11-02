@@ -21,6 +21,7 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 500ms        # a slow limiter must not slow every request
+      connect-timeout: 300ms
 
 server:
   shutdown: graceful

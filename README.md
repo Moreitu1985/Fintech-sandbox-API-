@@ -33,7 +33,7 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | AI ledger assistant | `POST /v1/assistant/ask` answers plain-English questions about your own ledger with Claude, through read-only tools scoped to your tenant ([ADR 0006](docs/adr/0006-ai-assistant-read-only-tools.md)) |
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
 | API security | Hashed API keys, constant-time checks, rate limits shared across instances in Redis, strict headers, RFC 9457 errors with request ids |
-| Observability | Prometheus metrics (transfers, fraud decisions, assistant tokens, rate limiting, HTTP, DB pool, JVM) behind a read-only metrics token; OpenTelemetry traces into the fraud service ([guide](docs/OBSERVABILITY.md)) |
+| Observability | Prometheus metrics (transfers, fraud decisions, assistant tokens, rate limiting, HTTP, DB pool, JVM) behind a read-only metrics token; OpenTelemetry traces of API requests and fraud-service calls ([guide](docs/OBSERVABILITY.md)) |
 
 ## Architecture
 
@@ -184,7 +184,7 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `IdempotencyTest` | Retries move money once; reusing a key with a different body is rejected |
 | `TenantIsolationTest` | A tenant cannot read, list or move another tenant's money |
 | PostgreSQL suite (`Postgres*Test`, `AppendOnlyHistoryTest`, `PostgresQueriesTest`) | Concurrency, idempotency, tenant isolation and transfer tests re-run on real PostgreSQL 16 via Testcontainers; the database itself refuses to update or delete postings, transfers and audit events; the fraud and assistant queries return correct figures; a blocked transfer's audit evidence survives the rollback. CI fails if these are skipped |
-| `RedisRateLimiterTest`, `RedisRateLimitApiTest` | Against real Redis: burst then 429 with `Retry-After`; two instances share one limit; buckets refill and expire; fails open if Redis is down |
+| `RedisRateLimiterTest`, `RedisRateLimitApiTest` | Against real Redis: burst then 429 with `Retry-After`; two instances share one limit; buckets refill and expire; with Redis down, fails open or closed as asked and a circuit breaker stops further calls |
 | `ObservabilityTest` | Metrics need the read-only metrics token (tenant keys and the admin token are refused); business, HTTP, DB-pool and JVM metrics are exported |
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |

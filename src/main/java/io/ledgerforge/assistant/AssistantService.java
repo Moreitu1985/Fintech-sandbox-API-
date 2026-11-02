@@ -104,8 +104,9 @@ public class AssistantService {
     }
 
     public Answer ask(UUID tenantId, String question) {
+        // Fail closed: this limit caps paid model calls, so an unavailable limiter must not lift it.
         if (!limiter.tryAcquire("assistant:" + tenantId, props.requestsPerMinute(),
-                props.requestsPerMinute() / 60.0).allowed()) {
+                props.requestsPerMinute() / 60.0, false).allowed()) {
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "ASSISTANT_RATE_LIMITED",
                     "Too many assistant questions. Try again in a minute.");
         }

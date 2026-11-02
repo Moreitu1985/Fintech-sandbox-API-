@@ -1,7 +1,10 @@
 package io.ledgerforge.common;
 
 import io.ledgerforge.IntegrationTestBase;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.test.context.TestPropertySource;
 
@@ -54,5 +57,20 @@ class ObservabilityTest extends IntegrationTestBase {
                 .contains("http_server_requests_seconds")
                 .contains("hikaricp_connections")
                 .contains("jvm_memory_used_bytes");
+    }
+
+    @Autowired
+    private Tracer tracer;
+
+    @Test
+    void tracingBridgeWorksWithTheOpenTelemetryVersionInUse() {
+        // OpenTelemetry is pinned above Boot's managed version for security fixes; prove the bridge still works.
+        Span span = tracer.nextSpan().name("compatibility-check").start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            assertThat(tracer.currentSpan()).isNotNull();
+            assertThat(span.context().traceId()).hasSize(32);
+        } finally {
+            span.end();
+        }
     }
 }

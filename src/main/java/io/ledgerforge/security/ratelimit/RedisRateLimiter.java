@@ -15,9 +15,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * instances can never both spend the last token. Time comes from the Redis server (TIME), not the
  * instances' clocks, so clock skew between instances can't mint extra tokens. Idle buckets expire.
  *
- * If Redis is unreachable the limiter fails OPEN (the request is allowed and a warning is logged):
- * rate limiting protects capacity, and an outage of the limiter should not become an outage of the API.
- * Authentication, validation and the ledger's own checks are unaffected.
+ * If Redis is unreachable, the caller decides: the API's request limits fail OPEN (rate limiting protects
+ * capacity, so a limiter outage should not become an API outage), while limits that cap spending, such
+ * as the AI assistant's, fail CLOSED. A circuit breaker then skips Redis for a few seconds, so an outage
+ * costs one timeout rather than one per request. Every failure increments an error metric.
  */
 public class RedisRateLimiter implements RateLimiter {
 
@@ -56,15 +57,32 @@ public class RedisRateLimiter implements RateLimiter {
     @SuppressWarnings("rawtypes")
     private static final RedisScript<List> SCRIPT = RedisScript.of(LUA, List.class);
 
+    /** After a failure, Redis is skipped for this long, so an outage costs one timeout, not one per request. */
+    static final long BREAKER_OPEN_MILLIS = 5_000;
+    /** Retry-After given when a fail-closed caller is refused because Redis is unavailable. */
+    static final long UNAVAILABLE_RETRY_SECONDS = 5;
+
     private final StringRedisTemplate redis;
+    private final Runnable onError;
+    private final AtomicLong breakerOpenUntil = new AtomicLong();
     private final AtomicLong lastWarning = new AtomicLong();
 
-    public RedisRateLimiter(StringRedisTemplate redis) {
+    /** @param onError called on every failure or skipped call (e.g. increments an error metric) */
+    public RedisRateLimiter(StringRedisTemplate redis, Runnable onError) {
         this.redis = redis;
+        this.onError = onError;
+    }
+
+    public RedisRateLimiter(StringRedisTemplate redis) {
+        this(redis, () -> { });
     }
 
     @Override
-    public Decision tryAcquire(String key, long capacity, double refillPerSecond) {
+    public Decision tryAcquire(String key, long capacity, double refillPerSecond, boolean failOpen) {
+        if (System.currentTimeMillis() < breakerOpenUntil.get()) {
+            onError.run();
+            return unavailable(failOpen);
+        }
         try {
             List<?> result = redis.execute(SCRIPT, List.of(KEY_PREFIX + key),
                     Long.toString(capacity), Double.toString(refillPerSecond / 1000.0));
@@ -76,11 +94,18 @@ public class RedisRateLimiter implements RateLimiter {
             return allowed ? Decision.ALLOW : new Decision(false, Math.max(1, (waitMs + 999) / 1000));
         } catch (RuntimeException e) {
             long now = System.currentTimeMillis();
+            breakerOpenUntil.set(now + BREAKER_OPEN_MILLIS);
+            onError.run();
             long last = lastWarning.get();
             if (now - last > 60_000 && lastWarning.compareAndSet(last, now)) {
-                log.warn("Redis rate limiter unavailable, allowing requests (fail-open): {}", e.getMessage());
+                log.warn("Redis rate limiter unavailable; skipping Redis for {} ms (fail-open callers allowed, "
+                        + "fail-closed callers refused): {}", BREAKER_OPEN_MILLIS, e.getMessage());
             }
-            return Decision.ALLOW;
+            return unavailable(failOpen);
         }
+    }
+
+    private static Decision unavailable(boolean failOpen) {
+        return failOpen ? Decision.ALLOW : new Decision(false, UNAVAILABLE_RETRY_SECONDS);
     }
 }
