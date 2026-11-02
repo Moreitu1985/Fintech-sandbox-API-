@@ -54,6 +54,12 @@ ledgerforge:
   admin-token: ${LEDGERFORGE_ADMIN_TOKEN:}
   # Read-only secret for Prometheus scraping (32+ characters, different from the admin token).
   metrics-token: ${LEDGERFORGE_METRICS_TOKEN:}
+  oauth:
+    # RSA private key (PKCS#8 PEM) that signs access tokens; must be the same on every instance.
+    # Empty = a temporary key is generated at startup (development and demo only).
+    signing-key: ${LEDGERFORGE_OAUTH_SIGNING_KEY:}
+    signing-key-file: ${LEDGERFORGE_OAUTH_SIGNING_KEY_FILE:}
+    token-ttl: 15m
   rate-limit:
     capacity: 100            # burst size per API key (or per IP when unauthenticated)
     refill-per-second: 50
@@ -69,6 +75,8 @@ ledgerforge:
       fail-open: ${FRAUD_FAIL_OPEN:true}   # sandbox default; set false to refuse transfers when scoring is down
       connect-timeout: 500ms
       read-timeout: 1500ms
+      # Name of a spring.ssl.bundle.pem.* bundle; turns on mutual TLS to the fraud service (needs an https url).
+      ssl-bundle: ${FRAUD_SSL_BUNDLE:}
   assistant:
     enabled: ${ASSISTANT_ENABLED:false}
     api-key: ${ANTHROPIC_API_KEY:}
@@ -119,6 +127,9 @@ spring:
     activate:
       on-profile: prod
   # SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD come from the environment.
+ledgerforge:
+  oauth:
+    require-signing-key: true   # production never runs on a temporary token-signing key
 springdoc:
   api-docs:
     enabled: false

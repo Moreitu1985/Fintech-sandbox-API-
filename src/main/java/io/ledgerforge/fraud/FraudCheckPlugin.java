@@ -11,11 +11,19 @@ import io.ledgerforge.plugin.TransferPlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
+
+import javax.net.ssl.SSLException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.net.http.HttpTimeoutException;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -49,9 +57,11 @@ public class FraudCheckPlugin implements TransferPlugin {
     private final AccountRepository accounts;
     private final AuditService audit;
     private final LedgerMetrics metrics;
+    private final boolean mutualTls;
 
     public FraudCheckPlugin(FraudProperties props, FraudFeatureCalculator features, AccountRepository accounts,
-                            AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder) {
+                            AuditService audit, LedgerMetrics metrics, RestClient.Builder restClientBuilder,
+                            SslBundles sslBundles) {
         if (props.url() == null || props.url().isBlank()) {
             throw new IllegalStateException("ledgerforge.plugins.fraud.url is required when the fraud plugin is enabled");
         }
@@ -60,7 +70,8 @@ public class FraudCheckPlugin implements TransferPlugin {
                     + FraudProperties.MIN_TOKEN_LENGTH + " characters");
         }
         this.props = props;
-        this.client = new FraudClient(props, restClientBuilder);
+        this.client = new FraudClient(props, restClientBuilder, sslBundles);
+        this.mutualTls = props.sslBundle() != null && !props.sslBundle().isBlank();
         this.metrics = metrics;
         this.features = features;
         this.accounts = accounts;
@@ -92,6 +103,15 @@ public class FraudCheckPlugin implements TransferPlugin {
         try {
             result = client.score(new FraudModels.ScoreRequest(transfer.reference(), features.compute(transfer, source)));
         } catch (ResourceAccessException | HttpServerErrorException outage) {
+            if (outage instanceof ResourceAccessException && isSecurityFailure(outage)) {
+                // A certificate problem (impostor, wrong CA, expired cert) is a security event, not an outage:
+                // never let it switch scoring off, whatever the fail-open setting says.
+                metrics.fraudDecision("error");
+                log.error("Secure connection to the fraud service failed (certificate or TLS problem); "
+                        + "refusing transfer: {}", outage.getMessage());
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_CHECK_UNAVAILABLE",
+                        "The fraud check could not be completed. The platform operator has been alerted.");
+            }
             metrics.fraudDecision("unavailable");
             if (props.failOpen()) {
                 log.warn("Fraud service unavailable, allowing transfer (fail-open): {}", outage.getMessage());
@@ -124,6 +144,27 @@ public class FraudCheckPlugin implements TransferPlugin {
         if (result.needsReview()) {
             audit.append(transfer.tenantId(), "FRAUD_REVIEW", evidence);
         }
+    }
+
+    /**
+     * A TLS error is always a security failure. With mutual TLS on, so is any other connection failure that
+     * isn't a recognised outage: under TLS 1.3 a server that rejects our client certificate may only drop the
+     * connection after the handshake, which the client sees as a reset or end-of-stream rather than a TLS
+     * error. Only connection refused, timeouts and unknown hosts count as outages (and 5xx, handled separately).
+     */
+    private boolean isSecurityFailure(Throwable e) {
+        boolean recognisedOutage = false;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SSLException) {
+                return true;
+            }
+            if (t instanceof ConnectException || t instanceof SocketTimeoutException
+                    || t instanceof HttpTimeoutException || t instanceof UnknownHostException
+                    || t instanceof NoRouteToHostException) {
+                recognisedOutage = true;
+            }
+        }
+        return mutualTls && !recognisedOutage;
     }
 
     private static String truncate(String s, int max) {
