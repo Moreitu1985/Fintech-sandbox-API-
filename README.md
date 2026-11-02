@@ -1,6 +1,7 @@
 # LedgerForge
 
 [![CI](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml)
+[![Load test](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml)
 ![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
 ![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -219,6 +220,22 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `fraud-service/tests` (pytest) | Scoring API, auth, validation, and model quality gates that fail CI if a retrained model gets worse |
 | `TransferFlowTest` | Insufficient funds, currency mismatch, plugin limits and validation errors behave correctly |
 
+## Performance under load
+
+A k6 load test ([`load/transfers.js`](load/transfers.js)) runs the real API (prod profile, PostgreSQL 16) on every change to the code, and weekly. It drives 200 requests a second for 60 seconds across 10 tenants (80% transfers, 20% balance reads), then checks every tenant's books: postings sum to zero, the audit chain verifies, money is conserved and no balance is negative.
+
+Latest result, on a single GitHub-hosted runner with the API and the database on the same machine:
+
+| Measure | Result |
+|---|---|
+| Transfers | ~160 a second sustained, 9,603 posted, 0 dropped |
+| Transfer latency p50 / p95 / p99 | 7 / 70 / 174 ms |
+| Balance read latency p50 / p95 | 2 / 28 ms |
+| Unexpected errors | 0 |
+| Integrity failures after the run | 0 |
+
+The run fails if p95 transfer latency passes 500 ms, p99 passes 1 s, or any error or integrity failure appears. Details and how to run it yourself: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
 ## Design decisions
 
 Short records of each trade-off live in [`docs/adr`](docs/adr):
@@ -240,7 +257,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
-| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS (done); load tests, Kubernetes, Terraform | In progress |
+| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS, load tests (done); Kubernetes, Terraform | In progress |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
