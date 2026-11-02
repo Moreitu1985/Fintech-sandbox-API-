@@ -1,0 +1,103 @@
+name: Infrastructure
+
+# Validates the Kubernetes manifests and the Terraform without touching any cloud account:
+# schema checks, formatting, `terraform validate`, and Trivy misconfiguration scans.
+on:
+  pull_request:
+    paths: ["deploy/**", ".github/workflows/infra.yml"]
+  push:
+    branches: [main]
+    paths: ["deploy/**", ".github/workflows/infra.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUSTOMIZE_VERSION: v5.8.3
+  KUSTOMIZE_SHA256: cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  KUBERNETES_VERSION: 1.33.0
+
+jobs:
+  kubernetes:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install kustomize and kubeconform (checksums pinned)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" && cd "$RUNNER_TEMP"
+          curl -sSfL -o kustomize.tgz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          echo "${KUSTOMIZE_SHA256}  kustomize.tgz" | sha256sum -c -
+          curl -sSfL -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum -c -
+          tar xzf kustomize.tgz -C bin && tar xzf kubeconform.tgz -C bin kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Render
+        run: |
+          mkdir -p rendered
+          kustomize build deploy/k8s/base > rendered/base.yaml
+          kustomize build deploy/k8s/overlays/aws > rendered/aws.yaml
+          if grep -nE '(SECRETS_READER_ROLE_ARN|AWS_REGION|LB_SUBNETS_CIDR|DATA_SUBNETS_CIDR|ACM_CERTIFICATE_ARN|API_HOSTNAME|PREFIX/)' rendered/aws.yaml; then
+            echo "::error::A placeholder was not replaced in the AWS overlay"; exit 1
+          fi
+          if grep -n 'name: aws-params' rendered/aws.yaml; then
+            echo "::error::The local-only aws-params ConfigMap was rendered"; exit 1
+          fi
+
+      - name: Validate against Kubernetes and CRD schemas
+        run: |
+          kubeconform -strict -summary -output text \
+            -kubernetes-version "$KUBERNETES_VERSION" \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered/base.yaml rendered/aws.yaml
+
+      - name: Trivy misconfiguration scan (rendered manifests)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: rendered
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.13.5
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -diff -recursive
+
+      - name: Validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Trivy misconfiguration scan (including the community modules)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: deploy/terraform
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: deploy/terraform/.trivyignore.yaml
+          trivy-config: deploy/terraform/trivy.yaml

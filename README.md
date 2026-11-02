@@ -1,6 +1,7 @@
 # LedgerForge
 
 [![CI](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml)
+[![Infrastructure](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/infra.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/infra.yml)
 [![Load test](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml)
 ![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
 ![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)
@@ -236,6 +237,18 @@ Latest result, on a single GitHub-hosted runner with the API and the database on
 
 The run fails if p95 transfer latency passes 500 ms, p99 passes 1 s, or any error or integrity failure appears. Details and how to run it yourself: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
 
+## Production deployment (AWS)
+
+[`deploy/`](deploy) holds Terraform for AWS (VPC, EKS, RDS PostgreSQL, ElastiCache Redis, ECR, KMS, Secrets Manager) and Kustomize manifests for Kubernetes. Defaults to the Cape Town region, so South African data stays in the country.
+
+- Hardened pods: non-root, read-only file system, no capabilities, Pod Security "restricted", default-deny NetworkPolicies
+- Mutual TLS between services with cert-manager; TLS to the database (verified) and Redis
+- Secrets generated into Secrets Manager and mounted as files by External Secrets Operator: none in Git
+- Only `/v1` and `/oauth` exposed to the internet; admin and metrics stay inside the cluster
+- Autoscaling, disruption budgets, zone spreading, Multi-AZ data stores with point-in-time recovery
+
+CI validates it on every change (Kubernetes and CRD schemas, `terraform validate`, Trivy). Runbook: [`deploy/README.md`](deploy/README.md).
+
 ## Design decisions
 
 Short records of each trade-off live in [`docs/adr`](docs/adr):
@@ -248,6 +261,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 6. [AI assistant through read-only, tenant-scoped tools](docs/adr/0006-ai-assistant-read-only-tools.md)
 7. [Rate limits shared across instances in Redis](docs/adr/0007-shared-rate-limiting-in-redis.md)
 8. [Short-lived OAuth 2.0 tokens and mutual TLS](docs/adr/0008-oauth2-tokens-and-mtls.md)
+9. [Kubernetes on EKS, provisioned with Terraform](docs/adr/0009-kubernetes-and-terraform-on-aws.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -257,7 +271,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
-| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS, load tests (done); Kubernetes, Terraform | In progress |
+| 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS, k6 load tests, Kubernetes, Terraform for AWS | Done |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
@@ -269,7 +283,9 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 **Fraud service:** Python 3.13 · FastAPI · LightGBM (TreeSHAP explanations) · scikit-learn · pandas · pytest
 
-**Operations:** Redis · Prometheus (Micrometer) · OpenTelemetry
+**Operations:** Redis · Prometheus (Micrometer) · OpenTelemetry · k6 load tests
+
+**Infrastructure:** Kubernetes (EKS) · Kustomize · Terraform · AWS (RDS, ElastiCache, ECR, KMS, Secrets Manager) · cert-manager · External Secrets Operator
 
 **Delivery and security:** Docker · Docker Compose · GitHub Actions · CodeQL (Java + Python) · Trivy · Dependabot · Render
 

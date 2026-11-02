@@ -1,0 +1,29 @@
+# AWS additions to the base policies. The ALB reaches the API pods directly (target type "ip") from the
+# public subnets only; the API reaches RDS (5432) and ElastiCache (6379) in the data subnets only.
+# Both ranges come from params.env (Terraform lays the subnets out so each is one CIDR).
+# Pods elsewhere in the cluster still can't reach the API: /admin and /actuator stay unreachable to them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ledger-api-aws
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: LB_SUBNETS_CIDR
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - ipBlock:
+            cidr: DATA_SUBNETS_CIDR
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379

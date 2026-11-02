@@ -1,0 +1,24 @@
+# Cloud-neutral base: the two services, hardened, with mutual TLS between them and default-deny networking.
+# Environment specifics (database, Redis, secrets source, images, ingress) live in overlays.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ledgerforge
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ledgerforge
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - ledger-api.yaml
+  - fraud-service.yaml
+  - mtls-certificates.yaml
+  - network-policies.yaml
+configMapGenerator:
+  - name: ledger-api-config
+    envs:
+      - ledger-api.env
+images:
+  - name: ledgerforge/ledger-api
+    newTag: "0.3.0"
+  - name: ledgerforge/fraud-service
+    newTag: "0.3.0"

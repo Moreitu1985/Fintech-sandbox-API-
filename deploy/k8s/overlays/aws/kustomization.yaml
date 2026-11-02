@@ -1,0 +1,100 @@
+# AWS (EKS) overlay: RDS PostgreSQL and ElastiCache Redis over TLS, secrets synced from AWS Secrets
+# Manager by External Secrets Operator, images from ECR, public traffic through an ALB.
+# Every environment-specific value comes from params.env, which Terraform writes for you.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ledgerforge
+resources:
+  - ../../base
+  - external-secrets.yaml
+  - ingress.yaml
+  - network-policies.yaml
+
+configMapGenerator:
+  - name: ledger-api-config
+    behavior: merge
+    literals:
+      - SPRING_DATA_REDIS_SSL_ENABLED=true   # ElastiCache in-transit encryption
+  # Values only used to fill in the fields below; not deployed.
+  - name: aws-params
+    envs:
+      - params.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+
+patches:
+  # The ALB controller holds back a rolling update until each new pod is healthy in the load balancer.
+  - target:
+      kind: Namespace
+      name: ledgerforge
+    patch: |-
+      - op: add
+        path: /metadata/labels/elbv2.k8s.aws~1pod-readiness-gate-inject
+        value: enabled
+  # Trust store for RDS's certificate authority, so the JDBC driver verifies the database's identity
+  # (sslmode=verify-full). Create it once: see deploy/README.md.
+  - target:
+      kind: Deployment
+      name: ledger-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: rds-ca
+          configMap:
+            name: rds-ca-bundle
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: rds-ca
+          mountPath: /etc/ledgerforge/rds
+          readOnly: true
+
+replacements:
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.LEDGER_API_IMAGE }
+    targets:
+      - select: { kind: Deployment, name: ledger-api }
+        fieldPaths: ["spec.template.spec.containers.[name=ledger-api].image"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.FRAUD_SERVICE_IMAGE }
+    targets:
+      - select: { kind: Deployment, name: fraud-service }
+        fieldPaths: ["spec.template.spec.containers.[name=fraud-service].image"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.DATASOURCE_URL }
+    targets:
+      - select: { kind: ConfigMap, name: ledger-api-config }
+        fieldPaths: ["data.SPRING_DATASOURCE_URL"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.REDIS_HOST }
+    targets:
+      - select: { kind: ConfigMap, name: ledger-api-config }
+        fieldPaths: ["data.REDIS_HOST"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.SECRETS_READER_ROLE_ARN }
+    targets:
+      - select: { kind: ServiceAccount, name: ledgerforge-secrets-reader }
+        fieldPaths: ["metadata.annotations.[eks.amazonaws.com/role-arn]"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.AWS_REGION }
+    targets:
+      - select: { kind: SecretStore, name: aws-secrets-manager }
+        fieldPaths: ["spec.provider.aws.region"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.SECRETS_PREFIX }
+    targets:
+      - select: { kind: ExternalSecret }
+        fieldPaths: ["spec.data.*.remoteRef.key"]
+        options: { delimiter: "/", index: 0 }
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.LB_SUBNETS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: ledger-api-aws }
+        fieldPaths: ["spec.ingress.0.from.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.DATA_SUBNETS_CIDR }
+    targets:
+      - select: { kind: NetworkPolicy, name: ledger-api-aws }
+        fieldPaths: ["spec.egress.0.to.0.ipBlock.cidr"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.ACM_CERTIFICATE_ARN }
+    targets:
+      - select: { kind: Ingress, name: ledger-api }
+        fieldPaths: ["metadata.annotations.[alb.ingress.kubernetes.io/certificate-arn]"]
+  - source: { kind: ConfigMap, name: aws-params, fieldPath: data.API_HOSTNAME }
+    targets:
+      - select: { kind: Ingress, name: ledger-api }
+        fieldPaths: ["spec.rules.0.host"]

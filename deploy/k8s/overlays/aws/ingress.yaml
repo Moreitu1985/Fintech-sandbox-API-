@@ -1,0 +1,38 @@
+# Public entry point: an AWS Application Load Balancer (AWS Load Balancer Controller), TLS 1.2+ only,
+# HTTP redirected to HTTPS. Only the client API is published: /admin and /actuator are not routed,
+# so operators reach them with `kubectl port-forward` instead of over the internet.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ledger-api
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: ACM_CERTIFICATE_ARN
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # Shorter than the pods' 45 s grace period, so the ALB stops sending before a pod exits.
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true,deletion_protection.enabled=true
+spec:
+  ingressClassName: alb
+  rules:
+    - host: API_HOSTNAME
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: ledger-api
+                port:
+                  name: http
+          - path: /oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: ledger-api
+                port:
+                  name: http

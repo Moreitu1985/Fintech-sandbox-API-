@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fraud-service
+  labels:
+    app.kubernetes.io/name: fraud-service
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service
+  labels:
+    app.kubernetes.io/name: fraud-service
+    app.kubernetes.io/component: fraud-scoring
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  # No replicas field: the HorizontalPodAutoscaler owns the count, and `kubectl apply` won't reset it.
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fraud-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fraud-service
+        app.kubernetes.io/component: fraud-scoring
+    spec:
+      serviceAccountName: fraud-service
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: fraud-service
+      containers:
+        - name: fraud-service
+          image: ledgerforge/fraud-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: FRAUD_TLS_CERT
+              value: /etc/fraud/tls/tls.crt
+            - name: FRAUD_TLS_KEY
+              value: /etc/fraud/tls/tls.key
+            - name: FRAUD_TLS_CLIENT_CA
+              value: /etc/fraud/tls/ca.crt
+            # The service reads this one secret from its environment; it is the second layer behind mTLS.
+            - name: FRAUD_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-api-secrets
+                  key: ledgerforge.plugins.fraud.token
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          # mTLS refuses anonymous HTTP, so the kubelet can only check that the port accepts connections.
+          startupProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/fraud/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tls
+          secret:
+            secretName: fraud-service-server-tls
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-service
+  labels:
+    app.kubernetes.io/name: fraud-service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: fraud-service
+  ports:
+    - name: https
+      port: 8090
+      targetPort: https
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fraud-service
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fraud-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fraud-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fraud-service
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

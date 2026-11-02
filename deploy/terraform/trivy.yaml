@@ -1,0 +1,5 @@
+# Trivy settings for the Terraform scan: Terraform checks only (the community modules ship example
+# Kubernetes YAML that isn't deployed and shouldn't fail this build).
+misconfiguration:
+  scanners:
+    - terraform
