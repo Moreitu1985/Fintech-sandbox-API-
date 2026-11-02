@@ -1,0 +1,28 @@
+# AWS additions to the base policies: the ALB reaches the API pods directly (target type "ip") from
+# inside the VPC, and the API reaches RDS (5432) and ElastiCache (6379), also inside the VPC.
+# The VPC CIDR is filled in from params.env. Security groups narrow this further at the AWS level.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ledger-api-aws
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: VPC_CIDR
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - ipBlock:
+            cidr: VPC_CIDR
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379

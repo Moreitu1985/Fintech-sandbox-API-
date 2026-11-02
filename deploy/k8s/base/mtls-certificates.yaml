@@ -1,0 +1,74 @@
+# cert-manager issues and rotates the mutual-TLS certificates for the ledger <-> fraud link.
+# A CA dedicated to this one link, so holding any certificate from it is the authorization (ADR 0008).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: mtls-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ledgerforge-mtls-ca
+spec:
+  isCA: true
+  commonName: ledgerforge-fraud-link-ca
+  secretName: ledgerforge-mtls-ca
+  duration: 87600h      # 10 years; the leaf certificates below rotate far more often
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: mtls-bootstrap
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: mtls-ca
+spec:
+  ca:
+    secretName: ledgerforge-mtls-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: fraud-service-server
+spec:
+  secretName: fraud-service-server-tls
+  commonName: fraud-service
+  dnsNames:
+    - fraud-service
+    - fraud-service.ledgerforge.svc
+    - fraud-service.ledgerforge.svc.cluster.local
+  usages: ["server auth", "digital signature"]
+  duration: 2160h       # 90 days
+  renewBefore: 720h     # renewed with 30 days left; Reloader restarts the pods onto it
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: mtls-ca
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ledger-api-client
+spec:
+  secretName: ledger-api-client-tls
+  commonName: ledger-api
+  usages: ["client auth", "digital signature"]
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: mtls-ca
+    kind: Issuer

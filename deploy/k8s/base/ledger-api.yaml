@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger-api
+  labels:
+    app.kubernetes.io/name: ledger-api
+# The API never calls the Kubernetes API, so it gets no token.
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-api
+  labels:
+    app.kubernetes.io/name: ledger-api
+    app.kubernetes.io/component: api
+  annotations:
+    # With Stakater Reloader installed, rotated secrets and certificates trigger a rolling restart.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ledger-api
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: ledger-api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        runAsGroup: 10002
+        fsGroup: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: ledger-api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: ledger-api
+      containers:
+        - name: ledger-api
+          image: ledgerforge/ledger-api
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ledger-api-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36       # up to 3 minutes for Flyway migrations on first start
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Let the load balancer stop sending traffic before Spring's graceful shutdown begins.
+              exec:
+                command: ["sleep", "10"]
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/ledgerforge/secrets
+              readOnly: true
+            - name: oauth-signing-key
+              mountPath: /etc/ledgerforge/oauth
+              readOnly: true
+            - name: mtls
+              mountPath: /etc/ledgerforge/mtls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Keys are Spring property names: spring.datasource.username, spring.datasource.password,
+        # spring.data.redis.password, ledgerforge.admin-token, ledgerforge.metrics-token,
+        # ledgerforge.plugins.fraud.token (and optionally ledgerforge.assistant.api-key).
+        - name: secrets
+          secret:
+            secretName: ledger-api-secrets
+            defaultMode: 0440
+        - name: oauth-signing-key
+          secret:
+            secretName: ledger-api-oauth-signing-key
+            defaultMode: 0440
+            items:
+              - key: signing.key
+                path: signing.key
+        - name: mtls
+          secret:
+            secretName: ledger-api-client-tls
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-api
+  labels:
+    app.kubernetes.io/name: ledger-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ledger-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ledger-api
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ledger-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ledger-api
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

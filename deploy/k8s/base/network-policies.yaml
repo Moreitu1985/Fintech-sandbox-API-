@@ -1,0 +1,88 @@
+# Default deny, then allow only the connections the design needs.
+# (On EKS this needs the VPC CNI's network policy agent, which the Terraform turns on.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# The fraud service accepts connections from the ledger API only, and makes none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fraud-service
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fraud-service
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ledger-api
+      ports:
+        - protocol: TCP
+          port: 8090
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ledger-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # Prometheus (in the "monitoring" namespace) scrapes /actuator/prometheus with the metrics token.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Load-balancer ingress and database/Redis egress are environment-specific: overlays add them
+    # (NetworkPolicies only ever add permissions, so the base stays as narrow as possible).
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fraud-service
+      ports:
+        - protocol: TCP
+          port: 8090
+    # HTTPS out for the Claude API (AI assistant) and an OTLP trace collector.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32   # never the cloud instance-metadata service
+      ports:
+        - protocol: TCP
+          port: 443
