@@ -30,6 +30,7 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | Tamper-evident audit | Per-tenant SHA-256 hash chain; append-only tables enforced by PostgreSQL triggers |
 | Proof on demand | `GET /v1/ledger/integrity` checks that books balance, balances match postings and the audit chain is intact |
 | Plugins | `TransferPlugin` beans hook into every transfer without touching the core (examples: per-transfer limit, fraud check) |
+| AI ledger assistant | `POST /v1/assistant/ask` answers plain-English questions about your own ledger with Claude, through read-only tools scoped to your tenant ([ADR 0006](docs/adr/0006-ai-assistant-read-only-tools.md)) |
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
 | API security | Hashed API keys, constant-time checks, rate limiting, strict headers, RFC 9457 errors with request ids |
 
@@ -61,6 +62,43 @@ Example reasons recorded for a blocked transfer: *"Transfer uses 97% of the avai
 Held-out results on synthetic data: at a 1% false-alarm rate the model catches **95.6%** of fraud, against **25.5%** for a hand-written rule at a similar rate. BLOCK decisions are **96.6%** precise. CI retrains the model and fails if quality drops. See the [model card](fraud-service/MODEL_CARD.md) for data, thresholds and limitations.
 
 Turn it on with `FRAUD_ENABLED=true`, `FRAUD_SERVICE_URL` and `FRAUD_SERVICE_TOKEN`. `docker compose up` runs all three services together. If the fraud service is down or times out, `FRAUD_FAIL_OPEN` decides whether transfers continue (logged) or are refused with `503`. A misconfiguration (wrong token, rejected request) always refuses, so it can never silently switch scoring off.
+
+## AI ledger assistant (Phase 2)
+
+Ask questions about your own ledger in plain English:
+
+```bash
+curl -s -X POST localhost:8080/v1/assistant/ask -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Which transfers were flagged for review this week, and from which accounts?"}'
+```
+
+```json
+{
+  "answer": "...",
+  "toolsUsed": ["fraud_events", "list_accounts"],
+  "rounds": 3,
+  "complete": true,
+  "model": "claude-haiku-5-5",
+  "inputTokens": 3120,
+  "outputTokens": 140
+}
+```
+
+Show `answer` as plain text.
+
+Claude answers by calling a small set of **read-only tools** that Java runs for it: `list_accounts`, `account_statement`, `transfer_summary`, `fraud_events` and `ledger_integrity`.
+
+| Risk | Protection |
+|---|---|
+| Seeing another fintech's data | The tenant comes from your API key, never from the model; foreign account ids look like missing ones (tested) |
+| Moving money or changing data | There are no write tools |
+| Prompt injection hidden in account names or descriptions | Tool results are wrapped as `{"untrusted_data": ...}`, a manipulated model can still only read the caller's own data, and links and images are stripped from answers so injected URLs can't leak data through a markdown renderer |
+| Runaway cost or load | Per question: at most 5 model calls (tools switched off on the last one), 4 tool calls per round, 60,000 characters of tool data, 1,024 output tokens, a 60-second deadline. Per tenant: 10 questions a minute. Per server: 8 questions in flight |
+| Accountability | Every question, including ones that fail part-way, goes into the tamper-evident audit chain with its outcome, the tools used and the token counts |
+| Truncated or refused answers | Marked `"complete": false`, never passed off as a full answer |
+
+Turn it on with `ASSISTANT_ENABLED=true` and `ANTHROPIC_API_KEY`; choose the model with `ASSISTANT_MODEL` (default `claude-haiku-5-5`). Tests run against a scripted fake of the Claude API, so CI needs no key.
 
 ## Public demo
 
@@ -147,6 +185,7 @@ Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 | `AuditTamperTest` | Editing a past audit record, or deleting the newest ones, directly in the database is detected at the exact index |
 | `SecurityTest` | Missing, malformed, forged and revoked keys are rejected; admin is separated; headers are set |
 | `FraudCheckPluginTest`, `FraudCheckFailClosedTest` | Features sent to the model are computed correctly; BLOCK moves no money; REVIEW is audited; outages fail open or closed as configured |
+| `AssistantTest` | Tools only ever see the caller's tenant; bad or unknown tool calls become recoverable errors; exact decimal amounts; tool loop and parallel calls capped; truncated or refused answers marked incomplete; links stripped; every question audited, including failed ones; Claude outage gives 503 |
 | `fraud-service/tests` (pytest) | Scoring API, auth, validation, and model quality gates that fail CI if a retrained model gets worse |
 | `TransferFlowTest` | Insufficient funds, currency mismatch, plugin limits and validation errors behave correctly |
 
@@ -159,6 +198,7 @@ Short records of each trade-off live in [`docs/adr`](docs/adr):
 3. [Hashed, prefixed API keys](docs/adr/0003-api-key-hashing.md)
 4. [Hash-chained audit log](docs/adr/0004-hash-chained-audit.md)
 5. [Fraud scoring as a synchronous plugin](docs/adr/0005-fraud-scoring-plugin.md)
+6. [AI assistant through read-only, tenant-scoped tools](docs/adr/0006-ai-assistant-read-only-tools.md)
 
 Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -167,7 +207,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 | Phase | Focus | Status |
 |---|---|---|
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
-| 2 | Python fraud-scoring service as a transfer plugin (done); LLM assistant endpoint | In progress |
+| 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
 | 3 | OAuth2 + mTLS, Redis rate limits, OpenTelemetry, Testcontainers, Kubernetes, load tests | Planned |
 | 4 | Next.js developer dashboard, TypeScript SDK, webhooks | Planned |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
@@ -175,6 +215,8 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 ## Tech stack
 
 **Ledger:** Java 21 · Spring Boot 3.5 · Spring Security · Spring Data JPA / Hibernate · PostgreSQL · Flyway · H2 (tests) · springdoc OpenAPI · JUnit 5
+
+**AI:** Claude API (tool use) for the ledger assistant
 
 **Fraud service:** Python 3.13 · FastAPI · LightGBM (TreeSHAP explanations) · scikit-learn · pandas · pytest
 

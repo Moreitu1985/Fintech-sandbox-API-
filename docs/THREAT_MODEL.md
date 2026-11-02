@@ -37,6 +37,9 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 | Tampering | Fraudulent transfer from a taken-over account | ML fraud check before money moves: BLOCK refuses, REVIEW is audited with reasons | Implemented (Phase 2) |
 | Spoofing | Rogue caller uses the fraud service, or a fake service answers the ledger | Shared 32+ char service token, constant-time check; service only on the internal Docker network | Implemented (mTLS in Phase 3) |
 | Denial of service | Fraud service slow or down stalls payments | 500 ms / 1.5 s timeouts; explicit fail-open or fail-closed policy | Implemented |
+| Information disclosure | AI assistant reveals another tenant's data | Tools take the tenant from the API key, never from the model; foreign ids look missing; no free-form SQL | Implemented (Phase 2) |
+| Tampering / Elevation | Prompt injection in account names, descriptions or fraud reasons steers the assistant | Only read-only tools exist; results wrapped as untrusted data; links and images stripped from answers; output goes only to the same caller | Implemented |
+| Denial of service | AI assistant used to run up model costs | 10 questions/min per tenant, 8 in flight per server, 5 model calls and 4 tool calls per round, 60k characters of tool data, capped output, 60 s deadline; off by default | Implemented |
 | **E**levation of privilege | Tenant key used on admin endpoints | Separate roles; admin requires the admin token | Implemented |
 | Elevation of privilege | Unknown or forgotten endpoints exposed | Default-deny authorization rule; only health is public | Implemented |
 
@@ -62,3 +65,4 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - No end-user (customer) authentication: tenants authenticate, and they are responsible for their own users.
 - Two Spring Framework 6.2 findings (CVE-2026-47884, CVE-2026-47890) are fixed only in Spring Framework 7. They are accepted in `.trivyignore` until 2027-01-31, with the Spring Boot 4 migration planned for Phase 3. Every other fixable CRITICAL/HIGH finding fails the build.
 - The fraud model is trained on synthetic data and defaults to fail-open in the sandbox. Real deployments need retraining on real labelled data and a fail-closed or fallback policy.
+- The AI assistant sends the tenant's own ledger data to an external model provider. Production use needs a data-processing agreement and a POPIA review.
