@@ -62,7 +62,7 @@ try {
   assert.equal(retry.id, pay.id);
   step("transfers posted; a retry with the same key moved no money");
 
-  const declined = await lf.transfers.create({ fromAccountId: bob.id, toAccountId: alice.id, amount: 9_999_999,
+  const declined = await lf.transfers.create({ fromAccountId: bob.id, toAccountId: alice.id, amount: 50_000,
     currency: "ZAR" }).catch((e: unknown) => e);
   assert.ok(declined instanceof LedgerForgeError && declined.code === "INSUFFICIENT_FUNDS", String(declined));
   assert.ok(declined.requestId, "errors carry a request id");

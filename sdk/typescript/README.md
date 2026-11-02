@@ -34,7 +34,7 @@ const alice = await lf.accounts.create({ name: "Alice", currency: "ZAR" });
 const t = await lf.transfers.create({ fromAccountId: treasury.id, toAccountId: alice.id, amount: 25_000, currency: "ZAR" });
 
 try {
-  await lf.transfers.create({ fromAccountId: alice.id, toAccountId: treasury.id, amount: 9_999_999, currency: "ZAR" });
+  await lf.transfers.create({ fromAccountId: alice.id, toAccountId: treasury.id, amount: 1_000_000, currency: "ZAR" });
 } catch (e) {
   if (e instanceof LedgerForgeError && e.code === "INSUFFICIENT_FUNDS") { /* tell the customer */ }
 }
