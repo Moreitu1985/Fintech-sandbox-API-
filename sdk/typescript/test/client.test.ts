@@ -174,6 +174,20 @@ describe("OAuth client credentials", () => {
     assert.equal(fake.requests.filter((r) => r.url.pathname === "/oauth/token").length, 1);
   });
 
+  it("one caller cancelling doesn't fail the shared token refresh for the others", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const fake = new FakeFetch().reply(async () => { await gate; return token("tok-1"); }, json(200, account));
+    const lf = new LedgerForge({ clientCredentials: creds, fetch: fake.fetch });
+    const controller = new AbortController();
+    const cancelled = lf.accounts.retrieve("a", { signal: controller.signal });
+    const other = lf.accounts.retrieve("b");
+    controller.abort(new Error("cancelled"));
+    release();
+    await assert.rejects(cancelled, /cancelled/);
+    assert.equal((await other).id, "a1");
+  });
+
   it("gets a new token once when the API rejects the current one", async () => {
     const fake = new FakeFetch().reply(token("old"), problem(401, "UNAUTHORIZED", "expired"), token("new"),
       json(200, account));

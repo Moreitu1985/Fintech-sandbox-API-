@@ -164,8 +164,10 @@ class TokenCache {
 
   async get(signal?: AbortSignal): Promise<string> {
     if (this.token && Date.now() < this.expiresAt) return this.token;
-    this.inFlight ??= this.fetchToken(signal).finally(() => { this.inFlight = undefined; });
-    return this.inFlight;
+    // The refresh is shared, so it isn't tied to one caller's signal: one caller cancelling must not fail
+    // the others. Each caller still stops waiting when its own signal fires.
+    this.inFlight ??= this.fetchToken().finally(() => { this.inFlight = undefined; });
+    return signal ? raceAbort(this.inFlight, signal) : this.inFlight;
   }
 
   invalidate(token: string): void {
@@ -175,7 +177,7 @@ class TokenCache {
     }
   }
 
-  private async fetchToken(signal?: AbortSignal): Promise<string> {
+  private async fetchToken(): Promise<string> {
     const form = new URLSearchParams({ grant_type: "client_credentials" });
     if (this.credentials.scopes?.length) form.set("scope", this.credentials.scopes.join(" "));
     const basic = btoa(`${encodeURIComponent(this.credentials.clientId)}:${encodeURIComponent(this.credentials.clientSecret)}`);
@@ -187,10 +189,9 @@ class TokenCache {
         headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded",
           Accept: "application/json" },
         body: form.toString(),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        signal: timeout,
       });
     } catch (e) {
-      if (isAbort(signal)) throw e;
       throw new ConnectionError("Requesting an access token failed", { cause: e });
     }
     if (!response.ok) {
@@ -245,6 +246,15 @@ function retryAfterMs(response: Response): number | undefined {
 /** Exponential backoff with full jitter: ~0.5 s, 1 s, 2 s... capped at 8 s. */
 function backoff(attempt: number): number {
   return Math.random() * Math.min(8000, 500 * 2 ** attempt);
+}
+
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 function isAbort(signal: AbortSignal | undefined): boolean {
