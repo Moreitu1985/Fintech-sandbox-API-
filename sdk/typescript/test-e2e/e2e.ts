@@ -89,7 +89,8 @@ try {
   const transfers = events.flatMap((e) => (e.type === "transfer.posted" ? [e.data] : []));
   assert.deepEqual(transfers.map((t) => t.amount).sort((a, b) => a - b), [2_500, 100_000]);
   assert.equal(events.filter((e) => e.type === "account.created").length, 3);
-  const tampered = Buffer.from(received[0]!.body.toString().replace(/"amount":\d+/, '"amount":1'));
+  // Any change to the signed bytes must fail, even one that leaves the JSON meaning the same.
+  const tampered = Buffer.concat([received[0]!.body, Buffer.from(" ")]);
   await assert.rejects(verifyWebhook(tampered, received[0]!.headers, hook.secret));
   step("5 webhooks received and verified; a tampered one is rejected");
 
