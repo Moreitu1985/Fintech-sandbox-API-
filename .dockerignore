@@ -1,0 +1,8 @@
+# Keeps local build output and dependencies out of image builds (they are rebuilt inside).
+.git
+**/node_modules
+**/.next
+**/dist
+**/test-results
+**/playwright-report
+target

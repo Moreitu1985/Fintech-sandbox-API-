@@ -109,6 +109,19 @@ services:
       retries: 20
     # Not published to the host: only the ledger API talks to it.
 
+  # Developer dashboard: http://localhost:3000 (sign in with a tenant API key).
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    depends_on:
+      - api
+    environment:
+      LEDGERFORGE_API_URL: http://api:8080
+      DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:?Set DASHBOARD_SESSION_SECRET in .env}
+    ports:
+      - "3000:3000"
+
 volumes:
   pgdata:
   certs:

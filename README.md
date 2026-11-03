@@ -3,6 +3,7 @@
 [![CI](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/ci.yml)
 [![Infrastructure](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/infra.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/infra.yml)
 [![TypeScript SDK](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/sdk.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/sdk.yml)
+[![Dashboard](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/dashboard.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/dashboard.yml)
 [![Load test](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml/badge.svg?branch=main)](https://github.com/Moreitu1985/Fintech-sandbox-API-/actions/workflows/load-test.yml)
 ![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
 ![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)
@@ -37,6 +38,7 @@ Every fintech needs a ledger, and most build one from scratch. The hard parts, c
 | AI fraud detection | A Python ML service scores each customer transfer before money moves: **BLOCK**, **REVIEW** or **ALLOW**, with plain-language reasons ([model card](fraud-service/MODEL_CARD.md)) |
 | Authentication | API keys, or OAuth 2.0 client credentials: 15-minute RS256 access tokens with scopes (`ledger:read`, `ledger:write`, `assistant`) and a public JWKS ([ADR 0008](docs/adr/0008-oauth2-tokens-and-mtls.md)) |
 | Webhooks | Signed `transfer.posted` and `account.created` events in the [Standard Webhooks](https://www.standardwebhooks.com) format, written in the same transaction as the money movement and delivered with retries; SSRF-guarded URLs and encrypted signing secrets ([ADR 0010](docs/adr/0010-webhooks.md)) |
+| Developer dashboard | Next.js app for accounts, statements, transfers and webhooks; the API key stays on the server in an encrypted session ([`dashboard`](dashboard)) |
 | TypeScript SDK | Typed client with no runtime dependencies: idempotent retries, OAuth token handling, typed errors and webhook verification ([`sdk/typescript`](sdk/typescript)) |
 | Service-to-service security | Mutual TLS between the ledger and the fraud service: each side proves its identity with a certificate from a private CA, plus a service token |
 | API security | Hashed API keys, constant-time checks, rate limits shared across instances in Redis, strict headers, RFC 9457 errors with request ids |
@@ -184,6 +186,12 @@ curl -s localhost:8080/v1/ledger/integrity -H "Authorization: Bearer $KEY"
 
 Interactive API docs (dev profile): <http://localhost:8080/swagger-ui.html>
 
+## Developer dashboard
+
+![Dashboard overview](docs/images/dashboard-overview.png)
+
+A Next.js 16 dashboard where a fintech signs in with its API key to see its accounts, statements and ledger integrity, make transfers and manage webhooks. It's a *backend for frontend*: pages render on the server and the key stays there in an AES-GCM-encrypted, `HttpOnly`, `SameSite=Strict` cookie. The transfer form carries an idempotency key, so a double click never pays twice. CI drives it with Playwright against the real API. See [`dashboard`](dashboard).
+
 ## TypeScript SDK
 
 ```ts
@@ -294,7 +302,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 | 1 | Ledger core, security, tests, Docker, CI, public demo profile | Done |
 | 2 | Python fraud-scoring service as a transfer plugin; AI ledger assistant with read-only tools | Done |
 | 3 | PostgreSQL tests with Testcontainers, Redis rate limits, Prometheus + OpenTelemetry, OAuth 2.0 + mTLS, k6 load tests, Kubernetes, Terraform for AWS | Done |
-| 4 | Webhooks, TypeScript SDK (done); Next.js developer dashboard | In progress |
+| 4 | Webhooks, TypeScript SDK, Next.js developer dashboard | Done |
 | 5 | Licensed-partner connectors (bank, KYC, open banking), POPIA review, SOC 2 readiness | Planned |
 
 ## Tech stack
@@ -309,7 +317,7 @@ Security analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 **Infrastructure:** Kubernetes (EKS) · Kustomize · Terraform · AWS (RDS, ElastiCache, ECR, KMS, Secrets Manager) · cert-manager · External Secrets Operator
 
-**SDK:** TypeScript 5.9 · Node 20+ · Web Crypto · node:test
+**SDK and dashboard:** TypeScript 5.9 · Node 20+ · Web Crypto · Next.js 16 · React 19 · Playwright
 
 **Delivery and security:** Docker · Docker Compose · GitHub Actions · CodeQL (Java + Python) · Trivy · Dependabot · Render
 
