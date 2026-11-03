@@ -1,6 +1,6 @@
 # Build from the repository root (the dashboard uses the SDK next to it):
 #   docker build -f dashboard/Dockerfile -t ledgerforge-dashboard .
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /repo
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY sdk/typescript/package.json sdk/typescript/package-lock.json sdk/typescript/
@@ -13,7 +13,7 @@ COPY dashboard dashboard
 RUN cd dashboard && npm run build
 
 # Runtime: the standalone server only (no build tools, no npm), as a non-root user.
-FROM node:22-alpine
+FROM node:26-alpine
 RUN apk upgrade --no-cache \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
               /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg \
