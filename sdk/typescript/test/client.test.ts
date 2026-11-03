@@ -29,6 +29,12 @@ describe("configuration", () => {
     assert.equal(req!.headers.get("accept"), "application/json");
   });
 
+  it("refuses ids that would change the path", async () => {
+    const fake = new FakeFetch();
+    for (const id of ["", ".", ".."]) await assert.rejects(client(fake).webhooks.retrieve(id), TypeError);
+    assert.equal(fake.requests.length, 0);
+  });
+
   it("escapes ids in paths", async () => {
     const fake = new FakeFetch().reply(json(200, account));
     await client(fake).accounts.retrieve("../admin");

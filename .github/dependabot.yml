@@ -47,3 +47,17 @@ updates:
     groups:
       sdk-dev-tools:
         patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/dashboard"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      dashboard:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/dashboard"
+    schedule:
+      interval: weekly

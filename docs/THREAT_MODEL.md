@@ -16,6 +16,7 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - API → database (the application role is trusted but must not be able to rewrite history)
 - Platform admin → `/admin` endpoints (in the AWS deployment, reachable only inside the cluster)
 - Ledger API ↔ fraud service (mutual TLS with a dedicated CA)
+- Browser ↔ developer dashboard: the browser never holds the API key; the dashboard server keeps it in an encrypted, HttpOnly, SameSite=Strict session cookie and calls the API itself
 - Cluster ↔ AWS (secrets read by one IAM role, limited to this environment's secrets)
 
 ## STRIDE analysis
@@ -76,4 +77,5 @@ Method: STRIDE over the main assets. Updated each phase. Status: **Implemented**
 - Worker nodes have unrestricted outbound HTTPS through NAT (pods are narrowed by NetworkPolicies); VPC endpoints and an egress firewall would narrow it further.
 - Terraform state holds the generated secrets, so the state bucket must be encrypted and tightly restricted.
 - Webhook DNS rebinding: an address is checked just before each send, but a host could change its DNS answer between the check and the connection. The Kubernetes egress policy (no private ranges) is the second layer; pinning the checked address for the connection is a next step.
+- The dashboard's sessions are stateless: signing out removes the cookie, but a stolen cookie works until it expires (8 hours) or the API key is revoked. A server-side session store would allow instant sign-out everywhere.
 - Revoking an API key doesn't recall access tokens already issued from it; they expire within 15 minutes.
