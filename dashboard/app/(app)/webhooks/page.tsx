@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { load, requireClient } from "@/lib/auth.ts";
 import { when } from "@/lib/format.ts";
+import { notice as noticeFor } from "@/lib/notices.ts";
 import { NewEndpointForm } from "./forms.tsx";
 
 export const metadata = { title: "Webhooks" };
 
-export default async function WebhooksPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
+export default async function WebhooksPage({ searchParams }: { searchParams: Promise<{ notice?: string; code?: string }> }) {
   const lf = await requireClient();
   const endpoints = await load(() => lf.webhooks.list());
-  const { notice } = await searchParams;
+  const { notice: code, code: errorCode } = await searchParams;
+  const notice = noticeFor(code, errorCode);
   return (
     <>
       <div className="page-head">
@@ -17,7 +19,7 @@ export default async function WebhooksPage({ searchParams }: { searchParams: Pro
           <p>LedgerForge calls your server when money moves. Each delivery is signed (Standard Webhooks) and retried for about a day.</p>
         </div>
       </div>
-      {notice && <div className="alert success" role="status">{notice}</div>}
+      {notice && <div className={`alert ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</div>}
       <section className="card">
         <div className="table-wrap">
           <table>

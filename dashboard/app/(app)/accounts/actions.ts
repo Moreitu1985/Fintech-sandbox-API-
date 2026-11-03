@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { describe, requireClient, type ActionResult } from "@/lib/auth.ts";
+import { actionError, requireClient, type ActionResult } from "@/lib/auth.ts";
 
 export async function createAccount(_prev: ActionResult<string> | null, form: FormData): Promise<ActionResult<string>> {
   const lf = await requireClient();
@@ -13,6 +13,6 @@ export async function createAccount(_prev: ActionResult<string> | null, form: Fo
     revalidatePath("/accounts");
     return { ok: true, value: account.id };
   } catch (e) {
-    return { ok: false, error: describe(e) };
+    return { ok: false, error: await actionError(e) };
   }
 }

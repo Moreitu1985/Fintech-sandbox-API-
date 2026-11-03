@@ -6,3 +6,7 @@
 **/test-results
 **/playwright-report
 target
+# Never bake local secrets into an image (next build copies .env files into its output).
+**/.env
+**/.env.*
+!**/.env.example

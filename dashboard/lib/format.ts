@@ -21,7 +21,13 @@ export function shortId(id: string): string {
 
 /** Parses a decimal amount typed by a person ("1 250,50" or "1250.50") into minor units, exactly. */
 export function parseAmount(input: string, fractionDigits = 2): number | null {
-  const cleaned = input.replace(/[\s ]/g, "").replace(",", ".");
+  let cleaned = input.replace(/[\s\u00a0]/g, "");
+  if (cleaned.includes(",")) {
+    // "1,250" means 1.25 in rand but 1250 to many readers, and 1.250 in a 3-decimal currency: accept a
+    // decimal comma only where it can't be confused (at most 2 decimals, and no point as well).
+    if (fractionDigits > 2 || cleaned.includes(".")) return null;
+    cleaned = cleaned.replace(",", ".");
+  }
   const match = /^(\d{1,13})(?:\.(\d+))?$/.exec(cleaned);
   if (!match) return null;
   const fraction = match[2] ?? "";

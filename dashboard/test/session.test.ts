@@ -39,6 +39,8 @@ describe("session cookie", () => {
   it("requires a proper secret in production", () => {
     assert.throws(() => sessionKey({ NODE_ENV: "production" }), /required/);
     assert.throws(() => sessionKey({ DASHBOARD_SESSION_SECRET: "c2hvcnQ=" }), /32 bytes/);
+    // A passphrase that happens to be 44 characters is not a key.
+    assert.throws(() => sessionKey({ DASHBOARD_SESSION_SECRET: "correct horse battery staple and more words!" }), /32 bytes/);
     assert.equal(sessionKey({ DASHBOARD_SESSION_SECRET: randomBytes(32).toString("base64") }).length, 32);
     assert.equal(sessionKey({}).length, 32, "development falls back to a temporary key");
   });

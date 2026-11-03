@@ -20,8 +20,11 @@ RUN apk upgrade --no-cache \
     && addgroup -S -g 10003 app && adduser -S -u 10003 -G app app
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
-COPY --from=build --chown=app:app /repo/dashboard/.next/standalone ./
+# Root-owned and read-only to the app user: the process can't rewrite its own code.
+COPY --from=build /repo/dashboard/.next/standalone ./
 USER app
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 # DASHBOARD_SESSION_SECRET (base64, 32 bytes) and LEDGERFORGE_API_URL must be set.
 CMD ["node", "dashboard/server.js"]

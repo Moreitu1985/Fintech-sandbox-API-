@@ -48,9 +48,40 @@ export async function load<T>(call: () => Promise<T>): Promise<T> {
     return await call();
   } catch (e) {
     if (e instanceof LedgerForgeError && e.status === 401) redirect("/session-expired");
-    if (e instanceof LedgerForgeError && e.status === 404) notFound();
+    if (e instanceof LedgerForgeError && (e.status === 404 || e.status === 400)) notFound();
     throw e;
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A path id must be a UUID: anything else is a 404 here, never a request to the API. */
+export function requireId(id: string): string {
+  if (!UUID.test(id)) notFound();
+  return id;
+}
+
+export function isId(id: unknown): id is string {
+  return typeof id === "string" && UUID.test(id);
+}
+
+/** A page number from the query string: small non-negative integers only. */
+export function pageParam(value: string | undefined): number {
+  return value && /^\d{1,6}$/.test(value) ? Number(value) : 0;
+}
+
+/**
+ * For form actions: a rejected key ends the session (the next page asks to sign in); anything else
+ * becomes a message for the form.
+ */
+export async function actionError(e: unknown): Promise<string> {
+  if (e instanceof LedgerForgeError && e.status === 401) {
+    await endSession();
+    redirect("/login?expired=1");
+  }
+  if (e instanceof LedgerForgeError || e instanceof ConnectionError) return describe(e);
+  console.error("Unexpected error in a dashboard action", e);
+  return "Something unexpected went wrong. Check whether the change was made before trying again.";
 }
 
 /** What a form action reports back. */

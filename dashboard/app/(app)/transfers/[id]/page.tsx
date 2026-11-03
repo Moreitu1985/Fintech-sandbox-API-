@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { load, requireClient } from "@/lib/auth.ts";
+import { load, requireClient, requireId } from "@/lib/auth.ts";
 import { money, when } from "@/lib/format.ts";
 
 export const metadata = { title: "Transfer" };
 
 export default async function TransferPage({ params }: { params: Promise<{ id: string }> }) {
   const lf = await requireClient();
-  const { id } = await params;
+  const id = requireId((await params).id);
   const t = await load(() => lf.transfers.retrieve(id));
   const [from, to] = await Promise.all([
     load(() => lf.accounts.retrieve(t.fromAccountId)),

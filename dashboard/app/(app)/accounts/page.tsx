@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { load, requireClient } from "@/lib/auth.ts";
+import { load, pageParam, requireClient } from "@/lib/auth.ts";
 import { money, when } from "@/lib/format.ts";
 import { NewAccountForm } from "./new-account-form.tsx";
 
@@ -7,7 +7,7 @@ export const metadata = { title: "Accounts" };
 
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const lf = await requireClient();
-  const page = Math.max(0, Number((await searchParams).page ?? 0) || 0);
+  const page = pageParam((await searchParams).page);
   const accounts = await load(() => lf.accounts.list({ page, size: 25 }));
   return (
     <>

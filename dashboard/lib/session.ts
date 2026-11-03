@@ -25,8 +25,9 @@ export function sessionKey(env: Record<string, string | undefined> = process.env
     devKey ??= randomBytes(32); // development: sessions end when the server restarts
     return devKey;
   }
-  const key = Buffer.from(secret, "base64");
-  if (key.length !== 32) {
+  const key = Buffer.from(secret.trim(), "base64");
+  // Strict: it must be real base64 of 32 bytes (Node's decoder would otherwise accept almost any text).
+  if (key.length !== 32 || key.toString("base64") !== secret.trim()) {
     throw new Error("DASHBOARD_SESSION_SECRET must be base64 for exactly 32 bytes");
   }
   return key;

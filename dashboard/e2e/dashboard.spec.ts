@@ -78,7 +78,13 @@ test("pages need a session, and bad keys are refused", async ({ page }) => {
 test("security headers are set", async ({ page }) => {
   const response = await page.goto("/login");
   const headers = response!.headers();
-  expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+  const csp = headers["content-security-policy"]!;
+  expect(csp).toContain("frame-ancestors 'none'");
+  const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"))!;
+  expect(scriptSrc).toMatch(/'nonce-[A-Za-z0-9+/=]+'/);
+  expect(scriptSrc).not.toContain("unsafe-inline");
+  const again = (await page.request.get("/login")).headers()["content-security-policy"];
+  expect(again).not.toBe(csp); // a fresh nonce per response
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["x-content-type-options"]).toBe("nosniff");
   expect(headers["referrer-policy"]).toBe("no-referrer");
@@ -106,12 +112,29 @@ test("sign in, open accounts and move money", async ({ page, context }) => {
   await expect(page.locator(".alert.success")).toContainText(/Transfer posted|already been made/);
 
   await page.waitForLoadState("networkidle"); // let the double click's second submit settle
-  await page.goto((await page.getByRole("link", { name: "View transfer" }).getAttribute("href"))!);
+  const firstHref = (await page.getByRole("link", { name: "View transfer" }).getAttribute("href"))!;
+
+  // A second, different transfer from the same page load gets its own key and posts normally.
+  const keyText = page.getByTestId("idempotency-key");
+  const firstKey = await keyText.textContent();
+  await choose(page, "From", "Treasury");
+  await choose(page, "To", "Alice wallet");
+  await page.getByLabel("Amount").fill("50");
+  await page.getByRole("button", { name: "Post transfer" }).click();
+  await expect(page.locator(".alert.success")).toContainText("Transfer posted");
+  await expect(keyText).not.toHaveText(firstKey!);       // moved on once...
+  await page.waitForTimeout(300);
+  const keyAfterSecond = await keyText.textContent();
+  await page.waitForTimeout(500);
+  await expect(keyText, "the key settles: no endless rotation").toHaveText(keyAfterSecond!);
+  await expect(page.getByRole("button", { name: "Post transfer" })).toBeEnabled();
+
+  await page.goto(firstHref);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("250,00");
 
   await page.getByRole("link", { name: "Alice wallet" }).click();
-  await expect(page.getByTestId("balance")).toContainText("250,00");
-  await expect(page.locator("tbody tr")).toHaveCount(1);   // exactly one posting
+  await expect(page.getByTestId("balance")).toContainText("300,00");
+  await expect(page.locator("tbody tr")).toHaveCount(2);   // one posting per transfer, none doubled
 
   // Insufficient funds comes back as the API's own explanation.
   await page.goto("/transfers/new");
@@ -174,4 +197,62 @@ test("revoking the key ends the session; signing out works", async ({ page, cont
   await page.goto("/accounts");
   await expect(page).toHaveURL(/\/login\?expired=1$/);
   expect((await context.cookies()).find((c) => c.name === "lf_session")).toBeUndefined();
+});
+
+test("a resubmit after a lost response is the same payment, not a second one", async ({ page }) => {
+  await signIn(page, tenant.apiKey);
+  await page.goto("/transfers/new");
+  const key = (await page.getByTestId("idempotency-key").textContent())!;
+  // The server gets the submit and moves the money, but the answer never reaches the browser.
+  let dropped = false;
+  await page.route("**/transfers/new", async (route) => {
+    if (route.request().method() === "POST" && !dropped) {
+      dropped = true;
+      await route.fetch();
+      await route.abort("connectionreset");
+      return;
+    }
+    await route.continue();
+  });
+  await choose(page, "From", "Treasury");
+  await choose(page, "To", "Alice wallet");
+  await page.getByLabel("Amount").fill("7.00");
+  await page.getByRole("button", { name: "Post transfer" }).click();
+  await expect(page.getByText("Something went wrong")).toBeVisible();
+  await page.getByRole("button", { name: "Try again" }).click();
+
+  // The form comes back with the same, unsettled key: sending the same transfer again is a replay.
+  await expect(page.getByTestId("idempotency-key")).toHaveText(key);
+  await choose(page, "From", "Treasury");
+  await choose(page, "To", "Alice wallet");
+  await page.getByLabel("Amount").fill("7.00");
+  await page.getByRole("button", { name: "Post transfer" }).click();
+  await expect(page.locator(".alert.success")).toContainText("already been made");
+  await expect(page.getByTestId("idempotency-key")).not.toHaveText(key);
+});
+
+test("bad ids are a 404, odd page numbers are ignored, and links can't write banners", async ({ page }) => {
+  await signIn(page, tenant.apiKey);
+  for (const path of ["/accounts/not-a-uuid", "/transfers/12345", "/webhooks/x%2Fy"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "Not found" }), path).toBeVisible();
+  }
+  await page.goto("/accounts?page=1e10");
+  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+
+  await page.goto("/webhooks?notice=Your%20key%20leaked%2C%20paste%20it%20at%20evil.example");
+  await expect(page.getByText("Your key leaked")).toHaveCount(0);
+  await page.goto("/webhooks?notice=deleted");
+  await expect(page.locator(".alert.success")).toContainText("Endpoint deleted");
+});
+
+test("the session-expired redirect is relative and other sites can't trigger it", async ({ request }) => {
+  const own = await request.get("/session-expired", { maxRedirects: 0 });
+  expect(own.status()).toBe(303);
+  expect(own.headers()["location"]).toBe("/login?expired=1");
+  expect(own.headers()["set-cookie"]).toContain("lf_session=;");
+
+  const cross = await request.get("/session-expired", { maxRedirects: 0, headers: { "Sec-Fetch-Site": "cross-site" } });
+  expect(cross.headers()["location"]).toBe("/");
+  expect(cross.headers()["set-cookie"]).toBeUndefined();
 });

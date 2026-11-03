@@ -7,7 +7,7 @@ export const metadata = { title: "Overview" };
 
 export default async function Overview() {
   const lf = await requireClient();
-  const [integrity, accounts, endpoints] = await Promise.all([
+  const [integrity, { items: accounts, truncated }, endpoints] = await Promise.all([
     load(() => lf.ledger.integrity()),
     load(() => allAccounts(lf)),
     load(() => lf.webhooks.list()),
@@ -43,7 +43,7 @@ export default async function Overview() {
         </section>
         <section className="card">
           <div className="stat-label">Accounts</div>
-          <div className="stat">{accounts.length}</div>
+          <div className="stat">{accounts.length}{truncated ? "+" : ""}</div>
           <p className="muted"><Link href="/accounts">View all</Link></p>
         </section>
         <section className="card">
@@ -76,7 +76,9 @@ export default async function Overview() {
           </div>
         )}
         <p className="muted" style={{ marginTop: 10 }}>
-          Double entry: the two columns always add up to zero, because every cent in a customer account came from a funding account.
+          {truncated
+            ? "Showing the first 1,000 accounts only, so these totals are partial."
+            : "Double entry: the two columns always add up to zero, because every cent in a customer account came from a funding account."}
         </p>
       </section>
     </>

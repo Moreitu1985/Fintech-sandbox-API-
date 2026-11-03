@@ -1,4 +1,6 @@
-import { load, requireClient } from "@/lib/auth.ts";
+import Link from "next/link";
+import { load, pageParam, requireClient, requireId } from "@/lib/auth.ts";
+import { notice as noticeFor } from "@/lib/notices.ts";
 import { shortId, when } from "@/lib/format.ts";
 import { endpointAction } from "../actions.ts";
 import { RotateSecretForm } from "../forms.tsx";
@@ -21,12 +23,13 @@ function Op({ id, op, label, kind = "secondary", deliveryId }: {
 }
 
 export default async function EndpointPage({ params, searchParams }: {
-  params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string; page?: string }>;
+  params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string; code?: string; page?: string }>;
 }) {
   const lf = await requireClient();
-  const { id } = await params;
-  const { notice, page: pageParam } = await searchParams;
-  const page = Math.max(0, Number(pageParam ?? 0) || 0);
+  const id = requireId((await params).id);
+  const query = await searchParams;
+  const notice = noticeFor(query.notice, query.code);
+  const page = pageParam(query.page);
   const [endpoint, deliveries] = await Promise.all([
     load(() => lf.webhooks.retrieve(id)),
     load(() => lf.webhooks.deliveries(id, { page, size: 25 })),
@@ -42,7 +45,7 @@ export default async function EndpointPage({ params, searchParams }: {
           </p>
         </div>
       </div>
-      {notice && <div className="alert success" role="status">{notice}</div>}
+      {notice && <div className={`alert ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</div>}
       {!endpoint.enabled && (
         <div className="alert error" role="alert">
           Disabled {endpoint.disabledAt ? `on ${when(endpoint.disabledAt)}` : ""} after repeated failed deliveries.
@@ -77,6 +80,10 @@ export default async function EndpointPage({ params, searchParams }: {
               {deliveries.items.length === 0 && <tr><td colSpan={6} className="muted">No deliveries yet.</td></tr>}
             </tbody>
           </table>
+        </div>
+        <div className="pager">
+          {page > 0 && <Link href={`/webhooks/${id}?page=${page - 1}`}>← Newer</Link>}
+          {page + 1 < deliveries.totalPages && <Link href={`/webhooks/${id}?page=${page + 1}`}>Older →</Link>}
         </div>
       </section>
     </>

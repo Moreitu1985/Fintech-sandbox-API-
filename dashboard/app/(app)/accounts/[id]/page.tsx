@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { load, requireClient } from "@/lib/auth.ts";
+import { load, pageParam, requireClient, requireId } from "@/lib/auth.ts";
 import { money, shortId, when } from "@/lib/format.ts";
 
 export const metadata = { title: "Account" };
@@ -8,8 +8,8 @@ export default async function AccountPage({ params, searchParams }: {
   params: Promise<{ id: string }>; searchParams: Promise<{ page?: string }>;
 }) {
   const lf = await requireClient();
-  const { id } = await params;
-  const page = Math.max(0, Number((await searchParams).page ?? 0) || 0);
+  const id = requireId((await params).id);
+  const page = pageParam((await searchParams).page);
   const [account, entries] = await Promise.all([
     load(() => lf.accounts.retrieve(id)),
     load(() => lf.accounts.entries(id, { page, size: 25 })),

@@ -13,9 +13,11 @@ describe("parseAmount", () => {
   });
 
   it("refuses anything ambiguous", () => {
-    for (const bad of ["", "0", "-5", "1.234", "1e3", "abc", "1,2,3", "12.", ".5", "1 2 3.4.5"]) {
+    for (const bad of ["", "0", "-5", "1.234", "1e3", "abc", "1,2,3", "12.", ".5", "1 2 3.4.5", "1,250", "1.250,00"]) {
       assert.equal(parseAmount(bad), null, bad);
     }
+    assert.equal(parseAmount("1,250", 3), null, "ambiguous in a 3-decimal currency");
+    assert.equal(parseAmount("1.250", 3), 1_250);
   });
 });
 
